@@ -1,0 +1,12 @@
+# Compiled binary
+gtnh-daily-updater
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+
+.env
+.envrc
