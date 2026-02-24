@@ -83,7 +83,7 @@ gtnh-daily-updater update --instance-dir "/path/to/instance"
 - `update`: apply a single-instance update
 - `update-all <profile> [profile...]`: update multiple saved profiles sequentially
 - `status`: compare local state vs latest manifest
-- `config diff [--all]`: show tracked file drift from baseline
+- `config diff [--all] [path]`: show tracked file drift, or file-level diff for one path
 - `exclude add|remove|list`: skip selected manifest mods
 - `extra add|remove|list`: manage non-manifest mods
 - `profile create|list|show|delete`: manage reusable option sets
@@ -152,6 +152,7 @@ gtnh-daily-updater update-all main-client alt-server
 - On server/other layouts, game files are resolved directly under `<instance-dir>/`
 - During pack-file merge conflicts, updater keeps your file and writes pack version as `*.packnew`
 - `config diff` compares current tracked files against stored baseline hashes from the last init/update
+- `config diff "GregTech/Pollution.cfg"` shows line differences for one file against the tracked config pack version
 
 ## Caching and Performance
 
