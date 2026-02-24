@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/caedis/gtnh-daily-updater/internal/logging"
 	"github.com/caedis/gtnh-daily-updater/internal/updater"
 	"github.com/spf13/cobra"
 )
@@ -22,8 +21,7 @@ which nightly config version is installed (e.g. "2.9.0-nightly-2026-02-10").
 If omitted, the latest config version is assumed.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if mode == "" {
-			logging.Infof("Error: --mode is required (client or server)\n")
-			return fmt.Errorf("--mode is required (client or server)")
+			return wrapUsageError(fmt.Errorf("--mode is required (client or server)"))
 		}
 		return updater.Init(context.Background(), instanceDir, mode, configVersion, getGithubToken())
 	},

@@ -84,6 +84,35 @@ func fetchAndLogAssetsDB(ctx context.Context) (*assets.AssetsDB, error) {
 	return db, nil
 }
 
+// FetchSharedData fetches the manifest and assets DB that can be reused
+// across multiple sequential profile updates to save bandwidth.
+func FetchSharedData(ctx context.Context) (*SharedData, error) {
+	m, err := fetchAndLogManifest(ctx)
+	if err != nil {
+		return nil, err
+	}
+	db, err := fetchAndLogAssetsDB(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return &SharedData{Manifest: m, AssetsDB: db}, nil
+}
+
+func resolveSharedData(ctx context.Context, shared *SharedData) (*manifest.DailyManifest, *assets.AssetsDB, error) {
+	if shared != nil {
+		return shared.Manifest, shared.AssetsDB, nil
+	}
+	m, err := fetchAndLogManifest(ctx)
+	if err != nil {
+		return nil, nil, err
+	}
+	db, err := fetchAndLogAssetsDB(ctx)
+	if err != nil {
+		return nil, nil, err
+	}
+	return m, db, nil
+}
+
 func refreshTrackedMods(state *config.LocalState, db *assets.AssetsDB, m *manifest.DailyManifest, modsDir string) error {
 	logging.Infoln("Scanning mods directory...")
 	allManifestMods := m.AllMods()

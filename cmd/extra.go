@@ -32,7 +32,7 @@ var extraAddCmd = &cobra.Command{
   - Default: looks up mod name in the GTNH assets database
   - --source github:Owner/Repo: downloads from GitHub releases
   - --source https://example.com/mod.jar: downloads from direct URL`,
-	Args: cobra.ExactArgs(1),
+	Args: usageArgs(cobra.ExactArgs(1)),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		name := args[0]
 
@@ -91,7 +91,7 @@ var extraAddCmd = &cobra.Command{
 			// Direct URL — just note it
 			logging.Infof("  Direct URL source: %s\n", spec.Source)
 		} else {
-			return fmt.Errorf("invalid source %q: must be empty (assets DB), github:Owner/Repo, or a URL", spec.Source)
+			return wrapUsageError(fmt.Errorf("invalid source %q: must be empty (assets DB), github:Owner/Repo, or a URL", spec.Source))
 		}
 
 		if state.ExtraMods == nil {
@@ -111,7 +111,7 @@ var extraAddCmd = &cobra.Command{
 var extraRemoveCmd = &cobra.Command{
 	Use:   "remove [mod names...]",
 	Short: "Remove extra mods",
-	Args:  cobra.MinimumNArgs(1),
+	Args:  usageArgs(cobra.MinimumNArgs(1)),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		state, err := config.Load(instanceDir)
 		if err != nil {
@@ -192,6 +192,6 @@ func normalizeExtraSide(raw string) (string, error) {
 	case side.Client, side.Server, side.Both, side.ClientJ9, side.ServerJ9, side.BothJ9:
 		return string(canonical), nil
 	default:
-		return "", fmt.Errorf("invalid --side %q: must be CLIENT, SERVER, BOTH, CLIENT_JAVA9, SERVER_JAVA9, or BOTH_JAVA9", raw)
+		return "", wrapUsageError(fmt.Errorf("invalid --side %q: must be CLIENT, SERVER, BOTH, CLIENT_JAVA9, SERVER_JAVA9, or BOTH_JAVA9", raw))
 	}
 }

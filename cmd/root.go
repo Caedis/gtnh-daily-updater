@@ -1,8 +1,10 @@
 package cmd
 
 import (
+	"errors"
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/caedis/gtnh-daily-updater/internal/logging"
 	"github.com/caedis/gtnh-daily-updater/internal/profile"
@@ -19,9 +21,11 @@ var (
 )
 
 var rootCmd = &cobra.Command{
-	Use:   "gtnh-daily-updater",
-	Short: "Update tool for GTNH daily builds",
-	Long:  "Automatically update GregTech: New Horizons daily modpack builds, including mod downloads and config merging.",
+	Use:           "gtnh-daily-updater",
+	Short:         "Update tool for GTNH daily builds",
+	Long:          "Automatically update GregTech: New Horizons daily modpack builds, including mod downloads and config merging.",
+	SilenceUsage:  true,
+	SilenceErrors: true,
 	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
 		// Apply profile defaults for flags not explicitly set by the user.
 		if profileName != "" {
@@ -73,11 +77,23 @@ func Execute() {
 		}
 	}
 	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		if isUsageError(err) {
+			if cmd, _, findErr := rootCmd.Find(os.Args[1:]); findErr == nil && cmd != nil {
+				_ = cmd.Usage()
+			} else {
+				_ = rootCmd.Usage()
+			}
+		}
 		os.Exit(1)
 	}
 }
 
 func init() {
+	rootCmd.SetFlagErrorFunc(func(cmd *cobra.Command, err error) error {
+		return wrapUsageError(err)
+	})
+
 	rootCmd.PersistentFlags().StringVarP(&instanceDir, "instance-dir", "d", ".", "Minecraft instance root directory")
 	rootCmd.PersistentFlags().StringVarP(&mode, "mode", "m", "", "Install mode: client or server")
 	rootCmd.PersistentFlags().StringVar(&githubToken, "github-token", "", "GitHub token for private mod downloads (also reads GITHUB_TOKEN env)")
@@ -91,4 +107,45 @@ func getGithubToken() string {
 		return githubToken
 	}
 	return os.Getenv("GITHUB_TOKEN")
+}
+
+type usageError struct {
+	err error
+}
+
+func (e *usageError) Error() string {
+	return e.err.Error()
+}
+
+func (e *usageError) Unwrap() error {
+	return e.err
+}
+
+func wrapUsageError(err error) error {
+	if err == nil {
+		return nil
+	}
+	return &usageError{err: err}
+}
+
+func usageArgs(validate cobra.PositionalArgs) cobra.PositionalArgs {
+	return func(cmd *cobra.Command, args []string) error {
+		if validate == nil {
+			return nil
+		}
+		if err := validate(cmd, args); err != nil {
+			return wrapUsageError(err)
+		}
+		return nil
+	}
+}
+
+func isUsageError(err error) bool {
+	var ue *usageError
+	if errors.As(err, &ue) {
+		return true
+	}
+
+	msg := err.Error()
+	return strings.HasPrefix(msg, "unknown command ")
 }

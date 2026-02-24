@@ -28,7 +28,7 @@ var (
 var profileCreateCmd = &cobra.Command{
 	Use:   "create <name>",
 	Short: "Create a new profile",
-	Args:  cobra.ExactArgs(1),
+	Args:  usageArgs(cobra.ExactArgs(1)),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		p := &profile.Profile{}
 
@@ -68,7 +68,7 @@ var profileCreateCmd = &cobra.Command{
 var profileListCmd = &cobra.Command{
 	Use:   "list",
 	Short: "List saved profiles",
-	Args:  cobra.NoArgs,
+	Args:  usageArgs(cobra.NoArgs),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		names, err := profile.List()
 		if err != nil {
@@ -88,7 +88,7 @@ var profileListCmd = &cobra.Command{
 var profileShowCmd = &cobra.Command{
 	Use:   "show <name>",
 	Short: "Show a profile's contents",
-	Args:  cobra.ExactArgs(1),
+	Args:  usageArgs(cobra.ExactArgs(1)),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		p, err := profile.Load(args[0])
 		if err != nil {
@@ -106,7 +106,7 @@ var profileShowCmd = &cobra.Command{
 var profileDeleteCmd = &cobra.Command{
 	Use:   "delete <name>",
 	Short: "Delete a saved profile",
-	Args:  cobra.ExactArgs(1),
+	Args:  usageArgs(cobra.ExactArgs(1)),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if err := profile.Delete(args[0]); err != nil {
 			return err

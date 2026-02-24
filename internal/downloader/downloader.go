@@ -21,6 +21,8 @@ type Download struct {
 	ModName string
 	// IsGitHubAPI indicates the URL is a GitHub API URL that needs special headers
 	IsGitHubAPI bool
+	// MavenFallbackURL is used when a GitHub download fails after retries.
+	MavenFallbackURL string
 }
 
 type Result struct {
@@ -78,6 +80,33 @@ func Run(ctx context.Context, downloads []Download, destDir string, concurrency 
 }
 
 func downloadFileWithRetry(ctx context.Context, dl Download, destDir, githubToken, cacheDir string) error {
+	lastErr := downloadFileWithRetryURL(ctx, dl, destDir, githubToken, cacheDir)
+	if lastErr == nil {
+		return nil
+	}
+	if dl.MavenFallbackURL == "" {
+		return lastErr
+	}
+
+	fallback := dl
+	fallback.URL = dl.MavenFallbackURL
+	fallback.IsGitHubAPI = false
+	fallback.MavenFallbackURL = ""
+	logging.Debugf(
+		"Verbose: github download failed for %s (%v); trying maven fallback url=%s\n",
+		dl.Filename,
+		lastErr,
+		fallback.URL,
+	)
+	fallbackErr := downloadFileWithRetryURL(ctx, fallback, destDir, githubToken, cacheDir)
+	if fallbackErr == nil {
+		return nil
+	}
+
+	return fmt.Errorf("downloading %s: github failed: %w; maven fallback failed: %v", dl.Filename, lastErr, fallbackErr)
+}
+
+func downloadFileWithRetryURL(ctx context.Context, dl Download, destDir, githubToken, cacheDir string) error {
 	var lastErr error
 	for attempt := 0; attempt < maxRetries; attempt++ {
 		if attempt > 0 {

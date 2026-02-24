@@ -19,12 +19,7 @@ func Run(ctx context.Context, opts Options) (*UpdateResult, error) {
 		return nil, err
 	}
 
-	m, err := fetchAndLogManifest(ctx)
-	if err != nil {
-		return nil, err
-	}
-
-	db, err := fetchAndLogAssetsDB(ctx)
+	m, db, err := resolveSharedData(ctx, opts.Shared)
 	if err != nil {
 		return nil, err
 	}

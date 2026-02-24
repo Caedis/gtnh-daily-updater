@@ -1,5 +1,17 @@
 package updater
 
+import (
+	"github.com/caedis/gtnh-daily-updater/internal/assets"
+	"github.com/caedis/gtnh-daily-updater/internal/manifest"
+)
+
+// SharedData holds pre-fetched remote data that can be reused across
+// sequential profile updates to avoid redundant network fetches.
+type SharedData struct {
+	Manifest *manifest.DailyManifest
+	AssetsDB *assets.AssetsDB
+}
+
 type Options struct {
 	InstanceDir string
 	DryRun      bool
@@ -9,6 +21,9 @@ type Options struct {
 	GithubToken string
 	CacheDir    string
 	NoCache     bool
+	// Shared optionally supplies pre-fetched manifest and assets DB.
+	// When non-nil, Run skips those network fetches.
+	Shared *SharedData
 }
 
 type UpdateResult struct {

@@ -17,7 +17,7 @@ var excludeCmd = &cobra.Command{
 var excludeAddCmd = &cobra.Command{
 	Use:   "add [mod names...]",
 	Short: "Exclude mods from updates",
-	Args:  cobra.MinimumNArgs(1),
+	Args:  usageArgs(cobra.MinimumNArgs(1)),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		state, err := config.Load(instanceDir)
 		if err != nil {
@@ -60,7 +60,7 @@ var excludeAddCmd = &cobra.Command{
 var excludeRemoveCmd = &cobra.Command{
 	Use:   "remove [mod names...]",
 	Short: "Stop excluding mods",
-	Args:  cobra.MinimumNArgs(1),
+	Args:  usageArgs(cobra.MinimumNArgs(1)),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		state, err := config.Load(instanceDir)
 		if err != nil {

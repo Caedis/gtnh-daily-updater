@@ -25,43 +25,47 @@ import (
 func resolveModDownload(db *assets.AssetsDB, modName, version, githubToken string, extraDownloads, latestDownloads map[string]resolvedExtra) (dl downloader.Download, ok bool) {
 	// Extra mod with pre-resolved download info
 	if dlInfo, isExtra := extraDownloads[modName]; isExtra {
-		return downloader.Download{
+		dl := downloader.Download{
 			URL:         dlInfo.URL,
 			Filename:    dlInfo.Filename,
 			ModName:     modName,
 			IsGitHubAPI: dlInfo.IsGitHubAPI,
-		}, true
+		}
+		return withMavenFallback(dl, db, modName, version), true
 	}
 
 	// --latest resolved from GitHub directly
 	if dlInfo, found := latestDownloads[modName]; found {
-		return downloader.Download{
+		dl := downloader.Download{
 			URL:         dlInfo.URL,
 			Filename:    dlInfo.Filename,
 			ModName:     modName,
 			IsGitHubAPI: dlInfo.IsGitHubAPI,
-		}, true
+		}
+		return withMavenFallback(dl, db, modName, version), true
 	}
 
 	// GitHub with auth
 	if githubToken != "" {
 		if apiURL, fn, err := db.ResolveDownloadWithAuth(modName, version); err == nil {
-			return downloader.Download{
+			dl := downloader.Download{
 				URL:         apiURL,
 				Filename:    fn,
 				ModName:     modName,
 				IsGitHubAPI: true,
-			}, true
+			}
+			return withMavenFallback(dl, db, modName, version), true
 		}
 	}
 
 	// GitHub public download
 	if url, filename, _, err := db.ResolveDownload(modName, version); err == nil {
-		return downloader.Download{
+		dl := downloader.Download{
 			URL:      url,
 			Filename: filename,
 			ModName:  modName,
-		}, true
+		}
+		return withMavenFallback(dl, db, modName, version), true
 	}
 
 	// Maven fallback for GTNH-hosted mods
@@ -76,6 +80,26 @@ func resolveModDownload(db *assets.AssetsDB, modName, version, githubToken strin
 	}
 
 	return downloader.Download{}, false
+}
+
+func withMavenFallback(dl downloader.Download, db *assets.AssetsDB, modName, version string) downloader.Download {
+	if !db.IsGTNH(modName) || !isGitHubDownload(dl.URL, dl.IsGitHubAPI) {
+		return dl
+	}
+	mavenURL, _ := maven.DownloadURL(modName, version)
+	if strings.TrimSpace(mavenURL) == "" || mavenURL == dl.URL {
+		return dl
+	}
+	dl.MavenFallbackURL = mavenURL
+	return dl
+}
+
+func isGitHubDownload(rawURL string, isGitHubAPI bool) bool {
+	if isGitHubAPI {
+		return true
+	}
+	url := strings.ToLower(strings.TrimSpace(rawURL))
+	return strings.HasPrefix(url, "https://api.github.com/") || strings.HasPrefix(url, "https://github.com/")
 }
 
 // resolveLatestVersions overrides manifest-pinned versions with the latest available.
