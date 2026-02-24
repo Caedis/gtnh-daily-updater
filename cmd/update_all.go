@@ -21,16 +21,11 @@ var (
 
 var updateAllCmd = &cobra.Command{
 	Use:   "update-all <profile> [profile...]",
-	Short: "Update multiple profiles sequentially, fetching the manifest and assets DB only once",
+	Short: "Update multiple profiles sequentially, fetching each manifest mode and assets DB once",
 	Args:  usageArgs(cobra.MinimumNArgs(1)),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := context.Background()
-
-		logging.Infoln("Fetching manifest and assets database (shared)...")
-		shared, err := updater.FetchSharedData(ctx)
-		if err != nil {
-			return err
-		}
+		sharedByMode := make(map[string]*updater.SharedData)
 
 		type profileResult struct {
 			name   string
@@ -62,7 +57,24 @@ var updateAllCmd = &cobra.Command{
 			opts := updater.Options{
 				InstanceDir: *p.InstanceDir,
 				GithubToken: getGithubToken(),
-				Shared:      shared,
+			}
+
+			mode, modeErr := updater.DetectMode(*p.InstanceDir)
+			if modeErr == nil {
+				shared, ok := sharedByMode[mode]
+				if !ok {
+					logging.Infof("Fetching %s manifest and assets database (shared)...\n", mode)
+					shared, err = updater.FetchSharedData(ctx, mode)
+					if err != nil {
+						results = append(results, profileResult{name: name, err: err})
+						if firstErr == nil {
+							firstErr = err
+						}
+						continue
+					}
+					sharedByMode[mode] = shared
+				}
+				opts.Shared = shared
 			}
 
 			if cmd.Flags().Changed("dry-run") {

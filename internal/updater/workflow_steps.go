@@ -46,8 +46,9 @@ func loadAndLogState(instanceDir string) (*config.LocalState, error) {
 		return nil, err
 	}
 	logging.Debugf(
-		"Verbose: loaded state mode=%s manifest-date=%q config=%s mods=%d excluded=%d extras=%d\n",
-		state.Mode,
+		"Verbose: loaded state side=%s mode=%s manifest-date=%q config=%s mods=%d excluded=%d extras=%d\n",
+		state.Side,
+		resolveMode(state),
 		state.ManifestDate,
 		state.ConfigVersion,
 		len(state.Mods),
@@ -57,9 +58,9 @@ func loadAndLogState(instanceDir string) (*config.LocalState, error) {
 	return state, nil
 }
 
-func fetchAndLogManifest(ctx context.Context) (*manifest.DailyManifest, error) {
-	logging.Infoln("Fetching latest daily manifest...")
-	m, err := manifest.Fetch(ctx)
+func fetchAndLogManifest(ctx context.Context, mode string) (*manifest.DailyManifest, error) {
+	logging.Infof("Fetching latest %s manifest...\n", mode)
+	m, err := manifest.Fetch(ctx, mode)
 	if err != nil {
 		return nil, fmt.Errorf("fetching manifest: %w", err)
 	}
@@ -86,8 +87,13 @@ func fetchAndLogAssetsDB(ctx context.Context) (*assets.AssetsDB, error) {
 
 // FetchSharedData fetches the manifest and assets DB that can be reused
 // across multiple sequential profile updates to save bandwidth.
-func FetchSharedData(ctx context.Context) (*SharedData, error) {
-	m, err := fetchAndLogManifest(ctx)
+func FetchSharedData(ctx context.Context, mode string) (*SharedData, error) {
+	parsedMode, err := manifest.ParseMode(mode)
+	if err != nil {
+		return nil, err
+	}
+
+	m, err := fetchAndLogManifest(ctx, parsedMode)
 	if err != nil {
 		return nil, err
 	}
@@ -95,22 +101,29 @@ func FetchSharedData(ctx context.Context) (*SharedData, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &SharedData{Manifest: m, AssetsDB: db}, nil
+	return &SharedData{Manifest: m, AssetsDB: db, Mode: parsedMode}, nil
 }
 
-func resolveSharedData(ctx context.Context, shared *SharedData) (*manifest.DailyManifest, *assets.AssetsDB, error) {
-	if shared != nil {
-		return shared.Manifest, shared.AssetsDB, nil
+func resolveSharedData(ctx context.Context, state *config.LocalState, shared *SharedData) (*manifest.DailyManifest, *assets.AssetsDB, string, error) {
+	mode := resolveMode(state)
+	if shared != nil && shared.Manifest != nil && shared.AssetsDB != nil {
+		sharedMode, err := manifest.ParseMode(shared.Mode)
+		if err != nil {
+			sharedMode = manifest.ModeDaily
+		}
+		if sharedMode == mode {
+			return shared.Manifest, shared.AssetsDB, mode, nil
+		}
 	}
-	m, err := fetchAndLogManifest(ctx)
+	m, err := fetchAndLogManifest(ctx, mode)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, "", err
 	}
 	db, err := fetchAndLogAssetsDB(ctx)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, "", err
 	}
-	return m, db, nil
+	return m, db, mode, nil
 }
 
 func refreshTrackedMods(state *config.LocalState, db *assets.AssetsDB, m *manifest.DailyManifest, modsDir string) error {
@@ -120,7 +133,7 @@ func refreshTrackedMods(state *config.LocalState, db *assets.AssetsDB, m *manife
 	filenameIdx := db.BuildFilenameIndex()
 	// Do not apply excludes during refresh. Excluded manifest mods still need to
 	// be detected on disk so diff can mark them as Removed and delete their jars.
-	scannedMods, err := scanInstalledMods(modsDir, filenameIdx, allManifestMods, nil, state.Mode)
+	scannedMods, err := scanInstalledMods(modsDir, filenameIdx, allManifestMods, nil, state.Side)
 	if err != nil {
 		return fmt.Errorf("scanning mods directory: %w", err)
 	}
@@ -303,12 +316,12 @@ func downloadMods(ctx context.Context, downloads []downloader.Download, needsDow
 	return nil
 }
 
-func updateLwjgl3ifyIfNeeded(ctx context.Context, changes []diff.ModChange, mode string, opts Options, rollback func(error) error) error {
+func updateLwjgl3ifyIfNeeded(ctx context.Context, changes []diff.ModChange, side string, opts Options, rollback func(error) error) error {
 	for _, c := range changes {
 		if (c.Type == diff.Added || c.Type == diff.Updated) && lwjgl3ify.NeedsUpdate(c.Name) {
 			logging.Infof("Updating lwjgl3ify launcher library to %s...\n", c.NewVersion)
 			var err error
-			if mode == "client" {
+			if side == "client" {
 				err = lwjgl3ify.UpdateClient(ctx, opts.InstanceDir, c.NewVersion, opts.GithubToken)
 			} else {
 				err = lwjgl3ify.UpdateServer(ctx, opts.InstanceDir, c.NewVersion, opts.GithubToken)
@@ -340,7 +353,7 @@ func mergeConfigsIfNeeded(ctx context.Context, state *config.LocalState, m *mani
 	return nil
 }
 
-func persistUpdatedState(state *config.LocalState, changes []diff.ModChange, m *manifest.DailyManifest, opts Options, db *assets.AssetsDB, extraDownloads, latestDownloads map[string]resolvedExtra, rollback func(error) error) error {
+func persistUpdatedState(state *config.LocalState, changes []diff.ModChange, m *manifest.DailyManifest, mode string, opts Options, db *assets.AssetsDB, extraDownloads, latestDownloads map[string]resolvedExtra, rollback func(error) error) error {
 	for _, c := range changes {
 		switch c.Type {
 		case diff.Added, diff.Updated:
@@ -361,11 +374,12 @@ func persistUpdatedState(state *config.LocalState, changes []diff.ModChange, m *
 
 	state.ConfigVersion = m.Config
 	state.ManifestDate = m.LastUpdated
+	state.Mode = mode
 
 	if err := state.Save(opts.InstanceDir); err != nil {
 		return rollback(fmt.Errorf("saving state: %w", err))
 	}
-	logging.Debugf("Verbose: saved state with manifest-date=%s config=%s\n", state.ManifestDate, state.ConfigVersion)
+	logging.Debugf("Verbose: saved state with mode=%s manifest-date=%s config=%s\n", state.Mode, state.ManifestDate, state.ConfigVersion)
 
 	return nil
 }

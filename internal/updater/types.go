@@ -10,6 +10,7 @@ import (
 type SharedData struct {
 	Manifest *manifest.DailyManifest
 	AssetsDB *assets.AssetsDB
+	Mode     string
 }
 
 type Options struct {

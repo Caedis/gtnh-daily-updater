@@ -41,7 +41,7 @@ type ComputeOptions struct {
 // Compute compares the current local state against a new manifest and returns the list of changes.
 func Compute(state *config.LocalState, newManifest *manifest.DailyManifest, opts *ComputeOptions) []ModChange {
 	newMods := newManifest.AllMods()
-	mode := state.Mode
+	sideMode := state.Side
 
 	// Build exclude set for O(1) lookups
 	excludeSet := make(map[string]bool)
@@ -57,7 +57,7 @@ func Compute(state *config.LocalState, newManifest *manifest.DailyManifest, opts
 	for _, name := range slices.Sorted(maps.Keys(newMods)) {
 		info := newMods[name]
 		s := side.Parse(info.Side)
-		if !s.IncludedIn(mode) {
+		if !s.IncludedIn(sideMode) {
 			continue
 		}
 
@@ -131,7 +131,7 @@ func Compute(state *config.LocalState, newManifest *manifest.DailyManifest, opts
 			}
 
 			s := side.Parse(extra.Side)
-			if !s.IncludedIn(mode) {
+			if !s.IncludedIn(sideMode) {
 				continue
 			}
 

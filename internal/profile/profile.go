@@ -14,6 +14,7 @@ import (
 // distinguish "not set" from zero values.
 type Profile struct {
 	InstanceDir *string `toml:"instance-dir,omitempty"`
+	Side        *string `toml:"side,omitempty"`
 	Mode        *string `toml:"mode,omitempty"`
 	Concurrency *int    `toml:"concurrency,omitempty"`
 	Latest      *bool   `toml:"latest,omitempty"`
@@ -41,6 +42,17 @@ func Load(name string) (*Profile, error) {
 	if _, err := toml.DecodeFile(path, &p); err != nil {
 		return nil, fmt.Errorf("loading profile %q: %w", name, err)
 	}
+
+	// Backward-compatibility migration:
+	// old "mode" represented side (client/server).
+	if p.Side == nil && p.Mode != nil {
+		switch strings.ToLower(strings.TrimSpace(*p.Mode)) {
+		case "client", "server":
+			p.Side = p.Mode
+			p.Mode = nil
+		}
+	}
+
 	return &p, nil
 }
 

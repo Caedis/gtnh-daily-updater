@@ -19,7 +19,7 @@ var (
 
 var updateCmd = &cobra.Command{
 	Use:   "update",
-	Short: "Update mods and tracked pack files to the latest daily build",
+	Short: "Update mods and tracked pack files to the latest manifest build",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		opts := updater.Options{
 			InstanceDir: instanceDir,

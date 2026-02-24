@@ -6,9 +6,20 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 )
 
-const ManifestURL = "https://raw.githubusercontent.com/GTNewHorizons/DreamAssemblerXXL/master/releases/manifests/daily.json"
+const (
+	DailyManifestURL        = "https://raw.githubusercontent.com/GTNewHorizons/DreamAssemblerXXL/master/releases/manifests/daily.json"
+	ExperimentalManifestURL = "https://raw.githubusercontent.com/GTNewHorizons/DreamAssemblerXXL/master/releases/manifests/experimental.json"
+
+	ModeDaily        = "daily"
+	ModeExperimental = "experimental"
+
+	// Deprecated aliases kept for internal compatibility.
+	TrackDaily        = ModeDaily
+	TrackExperimental = ModeExperimental
+)
 
 type DailyManifest struct {
 	Version      string             `json:"version"`
@@ -36,9 +47,52 @@ func (m *DailyManifest) AllMods() map[string]ModInfo {
 	return all
 }
 
-// Fetch downloads and parses the daily manifest from GitHub.
-func Fetch(ctx context.Context) (*DailyManifest, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, ManifestURL, nil)
+// ParseMode validates and normalizes a manifest mode.
+// Empty values default to "daily".
+func ParseMode(mode string) (string, error) {
+	switch strings.ToLower(strings.TrimSpace(mode)) {
+	case "", ModeDaily:
+		return ModeDaily, nil
+	case ModeExperimental:
+		return ModeExperimental, nil
+	default:
+		return "", fmt.Errorf("mode must be %q or %q", ModeDaily, ModeExperimental)
+	}
+}
+
+// ParseTrack is a deprecated wrapper around ParseMode.
+func ParseTrack(track string) (string, error) {
+	return ParseMode(track)
+}
+
+// URLForMode returns the manifest URL for a normalized mode.
+func URLForMode(mode string) (string, error) {
+	normalized, err := ParseMode(mode)
+	if err != nil {
+		return "", err
+	}
+
+	switch normalized {
+	case ModeExperimental:
+		return ExperimentalManifestURL, nil
+	default:
+		return DailyManifestURL, nil
+	}
+}
+
+// URLForTrack is a deprecated wrapper around URLForMode.
+func URLForTrack(track string) (string, error) {
+	return URLForMode(track)
+}
+
+// Fetch downloads and parses the selected manifest from GitHub.
+func Fetch(ctx context.Context, mode string) (*DailyManifest, error) {
+	manifestURL, err := URLForMode(mode)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, manifestURL, nil)
 	if err != nil {
 		return nil, fmt.Errorf("creating request: %w", err)
 	}

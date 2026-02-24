@@ -17,6 +17,7 @@ var profileCmd = &cobra.Command{
 // Flags for profile create
 var (
 	profInstanceDir *string
+	profSide        *string
 	profMode        *string
 	profConcurrency *int
 	profLatest      *bool
@@ -34,6 +35,9 @@ var profileCreateCmd = &cobra.Command{
 
 		if cmd.Flags().Changed("instance-dir") {
 			p.InstanceDir = profInstanceDir
+		}
+		if cmd.Flags().Changed("side") {
+			p.Side = profSide
 		}
 		if cmd.Flags().Changed("mode") {
 			p.Mode = profMode
@@ -120,7 +124,8 @@ func init() {
 	// Wire up flags for create. We use local variables so they only apply to
 	// this subcommand and don't collide with the root/update flags.
 	profInstanceDir = profileCreateCmd.Flags().String("instance-dir", "", "Minecraft instance root directory")
-	profMode = profileCreateCmd.Flags().String("mode", "", "Install mode: client or server")
+	profSide = profileCreateCmd.Flags().String("side", "", "Install side: client or server")
+	profMode = profileCreateCmd.Flags().String("mode", "", "Pack mode: daily or experimental")
 	profConcurrency = profileCreateCmd.Flags().Int("concurrency", 6, "Number of concurrent downloads")
 	profLatest = profileCreateCmd.Flags().Bool("latest", false, "Use latest non-pre versions")
 	profCacheDir = profileCreateCmd.Flags().String("cache-dir", "", "Cache directory for downloaded mods")

@@ -25,7 +25,7 @@ func TestSaveAndLoadInitializesMaps(t *testing.T) {
 
 	tmp := t.TempDir()
 	s := &LocalState{
-		Mode:          "client",
+		Side:          "client",
 		ManifestDate:  "2026-01-01",
 		ConfigVersion: "2.7.4",
 		// Intentionally nil maps to verify Load defaults.
@@ -46,8 +46,36 @@ func TestSaveAndLoadInitializesMaps(t *testing.T) {
 	if loaded.Mods == nil {
 		t.Fatalf("Mods should be initialized")
 	}
-	if loaded.Mode != "client" || loaded.ConfigVersion != "2.7.4" {
+	if loaded.Side != "client" || loaded.ConfigVersion != "2.7.4" {
 		t.Fatalf("unexpected loaded state: %+v", loaded)
+	}
+}
+
+func TestLoadMigratesLegacyModeAndManifestTrack(t *testing.T) {
+	t.Parallel()
+
+	tmp := t.TempDir()
+	legacy := `{
+  "mode": "client",
+  "manifest_track": "experimental",
+  "manifest_date": "2026-01-01",
+  "config_version": "2.7.4",
+  "config_hashes": {},
+  "mods": {}
+}`
+	if err := os.WriteFile(filepath.Join(tmp, StateFile), []byte(legacy), 0o644); err != nil {
+		t.Fatalf("WriteFile failed: %v", err)
+	}
+
+	loaded, err := Load(tmp)
+	if err != nil {
+		t.Fatalf("Load failed: %v", err)
+	}
+	if loaded.Side != "client" {
+		t.Fatalf("Side=%q want client", loaded.Side)
+	}
+	if loaded.Mode != "experimental" {
+		t.Fatalf("Mode=%q want experimental", loaded.Mode)
 	}
 }
 

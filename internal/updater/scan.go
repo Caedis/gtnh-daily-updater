@@ -15,7 +15,7 @@ import (
 // scanInstalledMods reads the mods directory and matches jar filenames against the
 // assets DB to determine what's actually installed. Returns a map of mod name to
 // InstalledMod. Unmatched jars are silently skipped.
-func scanInstalledMods(modsDir string, filenameIdx map[string][]assets.FilenameMatch, manifestMods map[string]manifest.ModInfo, excludeSet map[string]bool, mode string) (map[string]config.InstalledMod, error) {
+func scanInstalledMods(modsDir string, filenameIdx map[string][]assets.FilenameMatch, manifestMods map[string]manifest.ModInfo, excludeSet map[string]bool, sideMode string) (map[string]config.InstalledMod, error) {
 	mods := make(map[string]config.InstalledMod)
 	err := filepath.WalkDir(modsDir, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
@@ -56,8 +56,8 @@ func scanInstalledMods(modsDir string, filenameIdx map[string][]assets.FilenameM
 			modSide = manifestInfo.Side
 		}
 		s := side.Parse(modSide)
-		if !s.IncludedIn(mode) {
-			logging.Debugf("Verbose: side-filtered mod skipped during scan: %s side=%s mode=%s\n", match.ModName, modSide, mode)
+		if !s.IncludedIn(sideMode) {
+			logging.Debugf("Verbose: side-filtered mod skipped during scan: %s side=%s side-mode=%s\n", match.ModName, modSide, sideMode)
 			return nil
 		}
 

@@ -25,7 +25,7 @@ func TestRun_DoesNotShortCircuitOnManifestTimestampWithLatest(t *testing.T) {
 	}
 
 	state := &config.LocalState{
-		Mode:          "client",
+		Side:          "client",
 		ManifestDate:  "2026-02-20",
 		ConfigVersion: "cfg-1",
 		ConfigHashes:  map[string]string{},
@@ -96,6 +96,72 @@ func TestRun_DoesNotShortCircuitOnManifestTimestampWithLatest(t *testing.T) {
 	}
 }
 
+func TestRun_UsesExperimentalManifestFromState(t *testing.T) {
+	instanceDir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(instanceDir, "mods"), 0o755); err != nil {
+		t.Fatalf("MkdirAll failed: %v", err)
+	}
+
+	state := &config.LocalState{
+		Side:          "client",
+		Mode:          "experimental",
+		ManifestDate:  "2026-02-20",
+		ConfigVersion: "cfg-exp-1",
+		ConfigHashes:  map[string]string{},
+		Mods:          map[string]config.InstalledMod{},
+	}
+	if err := state.Save(instanceDir); err != nil {
+		t.Fatalf("Save failed: %v", err)
+	}
+
+	var dailyRequests, experimentalRequests int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/GTNewHorizons/DreamAssemblerXXL/master/releases/manifests/daily.json":
+			dailyRequests++
+			t.Fatalf("unexpected daily manifest request for experimental state")
+		case "/GTNewHorizons/DreamAssemblerXXL/master/releases/manifests/experimental.json":
+			experimentalRequests++
+			writeJSON(t, w, map[string]any{
+				"version":       "experimental",
+				"last_version":  "experimental-previous",
+				"last_updated":  "2026-02-21",
+				"config":        "cfg-exp-1",
+				"github_mods":   map[string]any{},
+				"external_mods": map[string]any{},
+			})
+		case "/GTNewHorizons/DreamAssemblerXXL/master/gtnh-assets.json":
+			writeJSON(t, w, map[string]any{
+				"config": map[string]any{"versions": []any{}},
+				"mods":   []any{},
+			})
+		default:
+			t.Fatalf("unexpected request path: %s", r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	restoreClient := rewriteDefaultHTTPClient(t, server)
+	defer restoreClient()
+
+	result, err := Run(context.Background(), Options{
+		InstanceDir: instanceDir,
+		DryRun:      true,
+	})
+	if err != nil {
+		t.Fatalf("Run failed: %v", err)
+	}
+	if result.Added != 0 || result.Updated != 0 || result.Removed != 0 {
+		t.Fatalf("unexpected summary: %+v", result)
+	}
+	if dailyRequests != 0 {
+		t.Fatalf("daily requests = %d, want 0", dailyRequests)
+	}
+	if experimentalRequests == 0 {
+		t.Fatalf("expected at least one experimental manifest request")
+	}
+}
+
 func TestRun_LatestDowngradeResolvedBackToInstalledBecomesUnchanged(t *testing.T) {
 	instanceDir := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(instanceDir, "mods"), 0o755); err != nil {
@@ -106,7 +172,7 @@ func TestRun_LatestDowngradeResolvedBackToInstalledBecomesUnchanged(t *testing.T
 	}
 
 	state := &config.LocalState{
-		Mode:          "client",
+		Side:          "client",
 		ManifestDate:  "2026-02-19",
 		ConfigVersion: "cfg-1",
 		ConfigHashes:  map[string]string{},
@@ -189,7 +255,7 @@ func TestRun_RemovesExcludedInstalledMod(t *testing.T) {
 	}
 
 	state := &config.LocalState{
-		Mode:          "client",
+		Side:          "client",
 		ManifestDate:  "2026-02-19",
 		ConfigVersion: "cfg-1",
 		ConfigHashes:  map[string]string{},
@@ -276,7 +342,7 @@ func TestRun_LatestOutOfAssetsDBIsNotRepeatedlyAdded(t *testing.T) {
 	}
 
 	state := &config.LocalState{
-		Mode:          "client",
+		Side:          "client",
 		ManifestDate:  "2026-02-19",
 		ConfigVersion: "cfg-1",
 		ConfigHashes:  map[string]string{},
@@ -350,7 +416,7 @@ func TestRun_GitHubDownloadFailureFallsBackToMaven(t *testing.T) {
 	}
 
 	state := &config.LocalState{
-		Mode:          "client",
+		Side:          "client",
 		ManifestDate:  "2026-02-19",
 		ConfigVersion: "cfg-1",
 		ConfigHashes:  map[string]string{},
@@ -533,7 +599,7 @@ func TestResolveExtraMod_GitHubSourceUsesBrowserURLWithoutToken(t *testing.T) {
 func TestStatus_ResolvesUnpinnedExtraVersionsBeforeDiff(t *testing.T) {
 	instanceDir := t.TempDir()
 	state := &config.LocalState{
-		Mode:          "client",
+		Side:          "client",
 		ManifestDate:  "2026-02-19",
 		ConfigVersion: "cfg-1",
 		ConfigHashes:  map[string]string{},
@@ -615,6 +681,8 @@ func newUpdaterMockServer(t *testing.T, data mockManifestAndAssets) *httptest.Se
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/GTNewHorizons/DreamAssemblerXXL/master/releases/manifests/daily.json":
+			writeJSON(t, w, data.manifest)
+		case "/GTNewHorizons/DreamAssemblerXXL/master/releases/manifests/experimental.json":
 			writeJSON(t, w, data.manifest)
 		case "/GTNewHorizons/DreamAssemblerXXL/master/gtnh-assets.json":
 			writeJSON(t, w, data.assets)

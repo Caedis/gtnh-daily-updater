@@ -5,12 +5,14 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 const StateFile = ".gtnh-daily-updater.json"
 
 type LocalState struct {
-	Mode          string                  `json:"mode"`
+	Side          string                  `json:"side"`
+	Mode          string                  `json:"mode,omitempty"`
 	ManifestDate  string                  `json:"manifest_date"`
 	ConfigVersion string                  `json:"config_version"`
 	ConfigHashes  map[string]string       `json:"config_hashes"`
@@ -45,6 +47,25 @@ func Load(instanceDir string) (*LocalState, error) {
 	var state LocalState
 	if err := json.Unmarshal(data, &state); err != nil {
 		return nil, fmt.Errorf("parsing state: %w", err)
+	}
+
+	// Backward-compatibility migration:
+	// - old "mode" held side (client/server)
+	// - old "manifest_track" held daily/experimental
+	var legacy struct {
+		ManifestTrack string `json:"manifest_track"`
+	}
+	_ = json.Unmarshal(data, &legacy)
+
+	if state.Side == "" {
+		switch strings.ToLower(state.Mode) {
+		case "client", "server":
+			state.Side = state.Mode
+			state.Mode = ""
+		}
+	}
+	if state.Mode == "" && legacy.ManifestTrack != "" {
+		state.Mode = legacy.ManifestTrack
 	}
 
 	if state.ConfigHashes == nil {

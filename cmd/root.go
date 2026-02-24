@@ -13,6 +13,7 @@ import (
 
 var (
 	instanceDir string
+	installSide string
 	mode        string
 	githubToken string
 	profileName string
@@ -35,6 +36,9 @@ var rootCmd = &cobra.Command{
 			}
 			if p.InstanceDir != nil && !cmd.Flags().Changed("instance-dir") {
 				instanceDir = *p.InstanceDir
+			}
+			if p.Side != nil && !cmd.Flags().Changed("side") {
+				installSide = *p.Side
 			}
 			if p.Mode != nil && !cmd.Flags().Changed("mode") {
 				mode = *p.Mode
@@ -95,7 +99,6 @@ func init() {
 	})
 
 	rootCmd.PersistentFlags().StringVarP(&instanceDir, "instance-dir", "d", ".", "Minecraft instance root directory")
-	rootCmd.PersistentFlags().StringVarP(&mode, "mode", "m", "", "Install mode: client or server")
 	rootCmd.PersistentFlags().StringVar(&githubToken, "github-token", "", "GitHub token for private mod downloads (also reads GITHUB_TOKEN env)")
 	rootCmd.PersistentFlags().StringVar(&profileName, "profile", "", "Load a saved option profile by name")
 	rootCmd.PersistentFlags().BoolVarP(&verbose, "verbose", "v", false, "Enable verbose logging")

@@ -19,8 +19,9 @@ func Status(ctx context.Context, instanceDir, githubToken string) error {
 		return err
 	}
 	logging.Debugf(
-		"Verbose: status state mode=%s manifest-date=%q config=%s mods=%d excluded=%d extras=%d\n",
-		state.Mode,
+		"Verbose: status state side=%s mode=%s manifest-date=%q config=%s mods=%d excluded=%d extras=%d\n",
+		state.Side,
+		resolveMode(state),
 		state.ManifestDate,
 		state.ConfigVersion,
 		len(state.Mods),
@@ -28,14 +29,16 @@ func Status(ctx context.Context, instanceDir, githubToken string) error {
 		len(state.ExtraMods),
 	)
 
-	logging.Infoln("Fetching latest daily manifest...")
-	m, err := manifest.Fetch(ctx)
+	mode := resolveMode(state)
+	logging.Infof("Fetching latest %s manifest...\n", mode)
+	m, err := manifest.Fetch(ctx, mode)
 	if err != nil {
 		return fmt.Errorf("fetching manifest: %w", err)
 	}
 	logging.Debugf("Verbose: status manifest updated=%s config=%s\n", m.LastUpdated, m.Config)
 
-	logging.Infof("Mode:      %s\n", state.Mode)
+	logging.Infof("Side:      %s\n", state.Side)
+	logging.Infof("Mode:      %s\n", mode)
 	logging.Infof("Current:   %s\n", state.ConfigVersion)
 	logging.Infof("Latest:    %s\n", m.Config)
 	logging.Infof("Updated:   %s\n", m.LastUpdated)

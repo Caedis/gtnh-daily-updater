@@ -17,11 +17,15 @@ import (
 // Init initializes tracking for an existing GTNH installation.
 // It scans the mods/ directory and matches jar filenames against the assets DB
 // to determine what's actually installed, rather than assuming the latest manifest.
-func Init(ctx context.Context, instanceDir, mode, configVersion, githubToken string) error {
-	if mode != "client" && mode != "server" {
-		return fmt.Errorf("mode must be 'client' or 'server'")
+func Init(ctx context.Context, instanceDir, side, configVersion, mode, githubToken string) error {
+	if side != "client" && side != "server" {
+		return fmt.Errorf("side must be 'client' or 'server'")
 	}
-	logging.Debugf("Verbose: init start instance=%q mode=%s config-version=%q github-token=%t\n", instanceDir, mode, configVersion, githubToken != "")
+	resolvedMode, err := resolveInitMode(configVersion, mode)
+	if err != nil {
+		return err
+	}
+	logging.Debugf("Verbose: init start instance=%q side=%s mode=%s config-version=%q github-token=%t\n", instanceDir, side, resolvedMode, configVersion, githubToken != "")
 
 	logging.Infoln("Fetching assets database...")
 	db, err := assets.Fetch(ctx)
@@ -39,8 +43,8 @@ func Init(ctx context.Context, instanceDir, mode, configVersion, githubToken str
 
 	modsDir := filepath.Join(gameDir, "mods")
 	// Fetch latest manifest to help disambiguate and for the manifest date
-	logging.Infoln("Fetching latest daily manifest...")
-	m, err := manifest.Fetch(ctx)
+	logging.Infof("Fetching latest %s manifest...\n", resolvedMode)
+	m, err := manifest.Fetch(ctx, resolvedMode)
 	if err != nil {
 		return fmt.Errorf("fetching manifest: %w", err)
 	}
@@ -58,7 +62,7 @@ func Init(ctx context.Context, instanceDir, mode, configVersion, githubToken str
 		}
 	}
 
-	mods, err := scanInstalledMods(modsDir, filenameIdx, allManifestMods, excludeSet, mode)
+	mods, err := scanInstalledMods(modsDir, filenameIdx, allManifestMods, excludeSet, side)
 	if err != nil {
 		return fmt.Errorf("scanning mods directory: %w", err)
 	}
@@ -110,7 +114,8 @@ func Init(ctx context.Context, instanceDir, mode, configVersion, githubToken str
 
 	// We don't set ManifestDate so the next update will always detect changes
 	state := &config.LocalState{
-		Mode:          mode,
+		Side:          side,
+		Mode:          resolvedMode,
 		ManifestDate:  "", // empty = force update on next run
 		ConfigVersion: configVersion,
 		ConfigHashes:  hashes,
@@ -128,7 +133,7 @@ func Init(ctx context.Context, instanceDir, mode, configVersion, githubToken str
 	}
 	logging.Debugf("Verbose: init state saved with excluded=%d extras=%d\n", len(state.ExcludeMods), len(state.ExtraMods))
 
-	logging.Infof("\nInitialized: detected %d mods (%s mode)\n", len(mods), mode)
+	logging.Infof("\nInitialized: detected %d mods (%s side)\n", len(mods), side)
 	logging.Infof("  Config version: %s\n", configVersion)
 	if len(unmatched) > 0 {
 		logging.Infof("  %d jars not recognized (user-added or unknown):\n", len(unmatched))

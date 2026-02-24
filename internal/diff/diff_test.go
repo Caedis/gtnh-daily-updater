@@ -9,7 +9,7 @@ import (
 
 func TestCompute_WithExcludesAndExtras(t *testing.T) {
 	state := &config.LocalState{
-		Mode: "client",
+		Side: "client",
 		Mods: map[string]config.InstalledMod{
 			"alpha":              {Version: "1.0.0", Side: "BOTH"},
 			"beta":               {Version: "1.0.0", Side: "CLIENT"},
@@ -69,7 +69,7 @@ func TestCompute_WithExcludesAndExtras(t *testing.T) {
 
 func TestCompute_NilOptionsAndSideFiltering(t *testing.T) {
 	state := &config.LocalState{
-		Mode: "server",
+		Side: "server",
 		Mods: map[string]config.InstalledMod{
 			"common": {Version: "1.0.0", Side: "BOTH"},
 		},

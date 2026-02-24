@@ -21,9 +21,6 @@ var statusCmd = &cobra.Command{
 			if p.InstanceDir != nil && !cmd.Flags().Changed("instance-dir") {
 				instanceDir = *p.InstanceDir
 			}
-			if p.Mode != nil && !cmd.Flags().Changed("mode") {
-				mode = *p.Mode
-			}
 		}
 		return updater.Status(context.Background(), instanceDir, getGithubToken())
 	},

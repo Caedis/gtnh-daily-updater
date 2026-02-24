@@ -19,7 +19,7 @@ func Run(ctx context.Context, opts Options) (*UpdateResult, error) {
 		return nil, err
 	}
 
-	m, db, err := resolveSharedData(ctx, opts.Shared)
+	m, db, mode, err := resolveSharedData(ctx, state, opts.Shared)
 	if err != nil {
 		return nil, err
 	}
@@ -84,13 +84,13 @@ func Run(ctx context.Context, opts Options) (*UpdateResult, error) {
 	if err := downloadMods(ctx, downloads, needsDownload, modsDir, opts, cacheDir, rollback); err != nil {
 		return nil, err
 	}
-	if err := updateLwjgl3ifyIfNeeded(ctx, changes, state.Mode, opts, rollback); err != nil {
+	if err := updateLwjgl3ifyIfNeeded(ctx, changes, state.Side, opts, rollback); err != nil {
 		return nil, err
 	}
 	if err := mergeConfigsIfNeeded(ctx, state, m, gameDir, db, opts, result, rollback); err != nil {
 		return nil, err
 	}
-	if err := persistUpdatedState(state, changes, m, opts, db, extraDownloads, latestDownloads, rollback); err != nil {
+	if err := persistUpdatedState(state, changes, m, mode, opts, db, extraDownloads, latestDownloads, rollback); err != nil {
 		return nil, err
 	}
 
