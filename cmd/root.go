@@ -11,6 +11,8 @@ import (
 	"github.com/spf13/cobra"
 )
 
+var version = "dev"
+
 var (
 	instanceDir string
 	installSide string
@@ -25,6 +27,7 @@ var rootCmd = &cobra.Command{
 	Use:           "gtnh-daily-updater",
 	Short:         "Update tool for GTNH daily builds",
 	Long:          "Automatically update GregTech: New Horizons daily modpack builds, including mod downloads and config merging.",
+	Version:       version,
 	SilenceUsage:  true,
 	SilenceErrors: true,
 	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
