@@ -98,7 +98,7 @@ func MergeConfigs(ctx context.Context, gameDir string, oldHashes map[string]stri
 				return fmt.Errorf("writing new config %s: %w", relPath, err)
 			}
 			result.FilesUpdated++
-			logging.Infof("  + %s (new)\n", relPath)
+			logging.Debugf("  + %s (new)\n", relPath)
 			return nil
 		}
 
@@ -108,7 +108,7 @@ func MergeConfigs(ctx context.Context, gameDir string, oldHashes map[string]stri
 				return fmt.Errorf("writing config %s: %w", relPath, err)
 			}
 			result.FilesUpdated++
-			logging.Infof("  + %s (restored)\n", relPath)
+			logging.Debugf("  + %s (restored)\n", relPath)
 			return nil
 		}
 
@@ -122,7 +122,7 @@ func MergeConfigs(ctx context.Context, gameDir string, oldHashes map[string]stri
 				return fmt.Errorf("writing config %s: %w", relPath, err)
 			}
 			result.FilesUpdated++
-			logging.Infof("  ~ %s (updated)\n", relPath)
+			logging.Debugf("  ~ %s (updated)\n", relPath)
 
 		case newHash == baseHash:
 			// Pack didn't change - keep user's version
@@ -157,7 +157,7 @@ func MergeConfigs(ctx context.Context, gameDir string, oldHashes map[string]stri
 					return fmt.Errorf("writing merged config %s: %w", relPath, err)
 				}
 				result.FilesMerged++
-				logging.Infof("  ~ %s (merged)\n", relPath)
+				logging.Debugf("  ~ %s (merged)\n", relPath)
 			}
 		}
 
