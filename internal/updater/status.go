@@ -39,9 +39,8 @@ func Status(ctx context.Context, instanceDir, githubToken string) error {
 
 	logging.Infof("Side:      %s\n", state.Side)
 	logging.Infof("Mode:      %s\n", mode)
-	logging.Infof("Current:   %s\n", state.ConfigVersion)
-	logging.Infof("Latest:    %s\n", m.Config)
-	logging.Infof("Updated:   %s\n", m.LastUpdated)
+	logging.Infof("Current:   %s\n", state.ManifestDate)
+	logging.Infof("Latest:    %s\n", m.LastUpdated)
 
 	if m.LastUpdated == state.ManifestDate {
 		logging.Infoln("\nAlready up to date.")
