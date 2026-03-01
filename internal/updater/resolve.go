@@ -7,11 +7,13 @@ import (
 	"io"
 	"net/http"
 	"path"
+	"strconv"
 	"strings"
 	"sync"
 
 	"github.com/caedis/gtnh-daily-updater/internal/assets"
 	"github.com/caedis/gtnh-daily-updater/internal/config"
+	"github.com/caedis/gtnh-daily-updater/internal/curseforge"
 	"github.com/caedis/gtnh-daily-updater/internal/diff"
 	"github.com/caedis/gtnh-daily-updater/internal/downloader"
 	"github.com/caedis/gtnh-daily-updater/internal/github"
@@ -259,7 +261,7 @@ func resolveLatestVersions(ctx context.Context, db *assets.AssetsDB, changes []d
 }
 
 // resolveExtraMod resolves an extra mod spec into version/side info and download details.
-func resolveExtraMod(ctx context.Context, name string, spec config.ExtraModSpec, db *assets.AssetsDB, githubToken string, latest bool) (diff.ResolvedExtraMod, resolvedExtra, error) {
+func resolveExtraMod(ctx context.Context, name string, spec config.ExtraModSpec, db *assets.AssetsDB, githubToken, curseforgeKey string, latest bool) (diff.ResolvedExtraMod, resolvedExtra, error) {
 	modSide := spec.Side
 	if modSide == "" {
 		modSide = "BOTH"
@@ -312,6 +314,38 @@ func resolveExtraMod(ctx context.Context, name string, spec config.ExtraModSpec,
 		}
 
 		return diff.ResolvedExtraMod{Version: version, Side: modSide}, dlInfo, nil
+
+	case strings.HasPrefix(spec.Source, "curseforge:"):
+		if curseforgeKey == "" {
+			return diff.ResolvedExtraMod{}, resolvedExtra{}, fmt.Errorf("CURSEFORGE_API_KEY is required for CurseForge mods (set via env or --curseforge-key)")
+		}
+		rest := strings.TrimPrefix(spec.Source, "curseforge:")
+		projectID, fileID, err := curseforge.ParseSource(rest)
+		if err != nil {
+			return diff.ResolvedExtraMod{}, resolvedExtra{}, err
+		}
+
+		var file curseforge.File
+		if fileID != 0 {
+			file, err = curseforge.FetchFile(ctx, projectID, fileID, curseforgeKey)
+		} else {
+			file, err = curseforge.FetchLatestFile(ctx, projectID, curseforge.GTNHGameVersion, curseforgeKey)
+		}
+		if err != nil {
+			return diff.ResolvedExtraMod{}, resolvedExtra{}, err
+		}
+
+		downloadURL, err := curseforge.ResolveDownloadURL(ctx, projectID, file, curseforgeKey)
+		if err != nil {
+			return diff.ResolvedExtraMod{}, resolvedExtra{}, err
+		}
+
+		version := strconv.Itoa(file.ID)
+		logging.Debugf("Verbose: extra mod %s CurseForge project=%d file=%d filename=%s\n", name, projectID, file.ID, file.FileName)
+		return diff.ResolvedExtraMod{Version: version, Side: modSide}, resolvedExtra{
+			URL:      downloadURL,
+			Filename: file.FileName,
+		}, nil
 
 	case strings.HasPrefix(spec.Source, "github:"):
 		repo := strings.TrimPrefix(spec.Source, "github:")

@@ -22,14 +22,15 @@ var updateCmd = &cobra.Command{
 	Short: "Update mods and tracked pack files to the latest manifest build",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		opts := updater.Options{
-			InstanceDir: instanceDir,
-			DryRun:      dryRun,
-			Force:       force,
-			Latest:      latest,
-			Concurrency: concurrency,
-			GithubToken: getGithubToken(),
-			CacheDir:    cacheDir,
-			NoCache:     noCache,
+			InstanceDir:   instanceDir,
+			DryRun:        dryRun,
+			Force:         force,
+			Latest:        latest,
+			Concurrency:   concurrency,
+			GithubToken:   getGithubToken(),
+			CurseForgeKey: getCurseForgeKey(),
+			CacheDir:      cacheDir,
+			NoCache:       noCache,
 		}
 
 		result, err := updater.Run(context.Background(), opts)

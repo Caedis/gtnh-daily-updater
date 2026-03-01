@@ -8,6 +8,7 @@ import (
 
 	"github.com/caedis/gtnh-daily-updater/internal/assets"
 	"github.com/caedis/gtnh-daily-updater/internal/config"
+	"github.com/caedis/gtnh-daily-updater/internal/curseforge"
 	"github.com/caedis/gtnh-daily-updater/internal/logging"
 	"github.com/caedis/gtnh-daily-updater/internal/side"
 	"github.com/spf13/cobra"
@@ -31,6 +32,8 @@ var extraAddCmd = &cobra.Command{
 	Long: `Add a mod not in the daily manifest. Sources:
   - Default: looks up mod name in the GTNH assets database
   - --source github:Owner/Repo: downloads from GitHub releases
+  - --source curseforge:12345: downloads latest release from CurseForge project
+  - --source curseforge:12345/67890: downloads a specific CurseForge file
   - --source https://example.com/mod.jar: downloads from direct URL`,
 	Args: usageArgs(cobra.ExactArgs(1)),
 	RunE: func(cmd *cobra.Command, args []string) error {
@@ -87,11 +90,25 @@ var extraAddCmd = &cobra.Command{
 				return fmt.Errorf("GitHub API returned HTTP %d for %q", resp.StatusCode, repo)
 			}
 			logging.Infof("  Validated GitHub repo: %s\n", repo)
+		} else if rest, ok := strings.CutPrefix(spec.Source, "curseforge:"); ok {
+			// CurseForge source — validate format
+			projectID, fileID, err := curseforge.ParseSource(rest)
+			if err != nil {
+				return wrapUsageError(fmt.Errorf("invalid --source %q: %w", spec.Source, err))
+			}
+			if getCurseForgeKey() == "" {
+				logging.Infof("  Warning: CURSEFORGE_API_KEY not set — set it before running update\n")
+			}
+			if fileID != 0 {
+				logging.Infof("  CurseForge source: project %d, file %d (pinned)\n", projectID, fileID)
+			} else {
+				logging.Infof("  CurseForge source: project %d (latest release)\n", projectID)
+			}
 		} else if strings.HasPrefix(spec.Source, "http://") || strings.HasPrefix(spec.Source, "https://") {
 			// Direct URL — just note it
 			logging.Infof("  Direct URL source: %s\n", spec.Source)
 		} else {
-			return wrapUsageError(fmt.Errorf("invalid source %q: must be empty (assets DB), github:Owner/Repo, or a URL", spec.Source))
+			return wrapUsageError(fmt.Errorf("invalid source %q: must be empty (assets DB), github:Owner/Repo, curseforge:12345, or a URL", spec.Source))
 		}
 
 		if state.ExtraMods == nil {

@@ -537,6 +537,7 @@ func TestResolveExtraMod_GitHubSourceUsesAPIURLWithToken(t *testing.T) {
 		config.ExtraModSpec{Source: "github:owner/repo"},
 		nil,
 		"test-token",
+		"",
 		false,
 	)
 	if err != nil {
@@ -582,6 +583,7 @@ func TestResolveExtraMod_GitHubSourceUsesBrowserURLWithoutToken(t *testing.T) {
 		"mod",
 		config.ExtraModSpec{Source: "github:owner/repo"},
 		nil,
+		"",
 		"",
 		false,
 	)

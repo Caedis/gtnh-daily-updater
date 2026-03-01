@@ -14,14 +14,15 @@ type SharedData struct {
 }
 
 type Options struct {
-	InstanceDir string
-	DryRun      bool
-	Force       bool
-	Latest      bool
-	Concurrency int
-	GithubToken string
-	CacheDir    string
-	NoCache     bool
+	InstanceDir    string
+	DryRun         bool
+	Force          bool
+	Latest         bool
+	Concurrency    int
+	GithubToken    string
+	CurseForgeKey  string
+	CacheDir       string
+	NoCache        bool
 	// Shared optionally supplies pre-fetched manifest and assets DB.
 	// When non-nil, Run skips those network fetches.
 	Shared *SharedData
