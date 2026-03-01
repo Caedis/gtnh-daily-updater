@@ -55,8 +55,9 @@ var updateAllCmd = &cobra.Command{
 
 			// Build options: CLI-flag-wins over profile values.
 			opts := updater.Options{
-				InstanceDir: *p.InstanceDir,
-				GithubToken: getGithubToken(),
+				InstanceDir:   *p.InstanceDir,
+				GithubToken:   getGithubToken(),
+				CurseForgeKey: getCurseForgeKey(),
 			}
 
 			mode, modeErr := updater.DetectMode(*p.InstanceDir)

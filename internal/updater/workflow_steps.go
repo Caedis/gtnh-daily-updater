@@ -28,7 +28,7 @@ func normalizeRunOptions(opts Options) Options {
 
 func logRunStart(opts Options) {
 	logging.Debugf(
-		"Verbose: update start instance=%q dry-run=%t force=%t latest=%t concurrency=%d no-cache=%t cache-dir=%q github-token=%t\n",
+		"Verbose: update start instance=%q dry-run=%t force=%t latest=%t concurrency=%d no-cache=%t cache-dir=%q github-token=%t curseforge-key=%t\n",
 		opts.InstanceDir,
 		opts.DryRun,
 		opts.Force,
@@ -37,6 +37,7 @@ func logRunStart(opts Options) {
 		opts.NoCache,
 		opts.CacheDir,
 		opts.GithubToken != "",
+		opts.CurseForgeKey != "",
 	)
 }
 
@@ -173,7 +174,7 @@ func resolveConfiguredExtras(ctx context.Context, state *config.LocalState, db *
 	for _, name := range slices.Sorted(maps.Keys(state.ExtraMods)) {
 		spec := state.ExtraMods[name]
 		logging.Debugf("Verbose: resolving extra mod %s source=%q version=%q side=%q\n", name, spec.Source, spec.Version, spec.Side)
-		resolved, dlInfo, err := resolveExtraMod(ctx, name, spec, db, opts.GithubToken, opts.Latest)
+		resolved, dlInfo, err := resolveExtraMod(ctx, name, spec, db, opts.GithubToken, opts.CurseForgeKey, opts.Latest)
 		if err != nil {
 			unresolvedExtras = append(unresolvedExtras, fmt.Sprintf("%s (%v)", name, err))
 			logging.Debugf("Verbose: failed resolving extra mod %s: %v\n", name, err)

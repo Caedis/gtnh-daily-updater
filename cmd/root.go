@@ -14,13 +14,14 @@ import (
 var version = "dev"
 
 var (
-	instanceDir string
-	installSide string
-	mode        string
-	githubToken string
-	profileName string
-	verbose     bool
-	logFile     string
+	instanceDir   string
+	installSide   string
+	mode          string
+	githubToken   string
+	curseforgeKey string
+	profileName   string
+	verbose       bool
+	logFile       string
 )
 
 var rootCmd = &cobra.Command{
@@ -103,6 +104,7 @@ func init() {
 
 	rootCmd.PersistentFlags().StringVarP(&instanceDir, "instance-dir", "d", ".", "Minecraft instance root directory")
 	rootCmd.PersistentFlags().StringVar(&githubToken, "github-token", "", "GitHub token for private mod downloads (also reads GITHUB_TOKEN env)")
+	rootCmd.PersistentFlags().StringVar(&curseforgeKey, "curseforge-key", "", "CurseForge API key for CurseForge extra mods (also reads CURSEFORGE_API_KEY env)")
 	rootCmd.PersistentFlags().StringVar(&profileName, "profile", "", "Load a saved option profile by name")
 	rootCmd.PersistentFlags().BoolVarP(&verbose, "verbose", "v", false, "Enable verbose logging")
 	rootCmd.PersistentFlags().StringVar(&logFile, "log-file", "", "Write command output to a log file")
@@ -113,6 +115,13 @@ func getGithubToken() string {
 		return githubToken
 	}
 	return os.Getenv("GITHUB_TOKEN")
+}
+
+func getCurseForgeKey() string {
+	if curseforgeKey != "" {
+		return curseforgeKey
+	}
+	return os.Getenv("CURSEFORGE_API_KEY")
 }
 
 type usageError struct {
