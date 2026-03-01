@@ -82,6 +82,10 @@ func (db *AssetsDB) buildIndex() {
 		})
 		db.modIndex[db.Mods[i].Name] = &db.Mods[i]
 	}
+	// Sort config versions by semver descending so newest is first
+	slices.SortFunc(db.Config.Versions, func(a, b VersionAsset) int {
+		return semver.Compare(b.VersionTag, a.VersionTag)
+	})
 }
 
 // LookupMod finds a mod by name in the index.
@@ -252,6 +256,18 @@ func (db *AssetsDB) LatestNonPreVersion(modName string) (string, error) {
 	}
 
 	return "", fmt.Errorf("no stable non-pre version found for mod %q", modName)
+}
+
+// LatestNonPreConfigVersion returns the latest non-prerelease config version tag,
+// filtering out both the Prerelease flag and "-pre" suffixed version tags.
+// Returns empty string if no non-prerelease version is found.
+func (db *AssetsDB) LatestNonPreConfigVersion() string {
+	for _, v := range db.Config.Versions {
+		if !v.Prerelease && !strings.HasSuffix(strings.ToLower(strings.TrimSpace(v.VersionTag)), "-pre") {
+			return v.VersionTag
+		}
+	}
+	return ""
 }
 
 // ResolveConfigDownload finds the download URL for a config version.

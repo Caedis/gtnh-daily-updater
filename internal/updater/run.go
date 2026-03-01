@@ -46,18 +46,25 @@ func Run(ctx context.Context, opts Options) (*UpdateResult, error) {
 		resolveLatestVersions(ctx, db, changes, extraDownloads, latestDownloads, opts)
 	}
 
+	effectiveConfigVersion := m.Config
+	if opts.Latest {
+		if lv := db.LatestNonPreConfigVersion(); lv != "" {
+			effectiveConfigVersion = lv
+		}
+	}
+
 	added, removed, updated, unchanged := diff.Summary(changes)
 	logging.Debugf("Verbose: diff summary added=%d removed=%d updated=%d unchanged=%d\n", added, removed, updated, unchanged)
 	result := &UpdateResult{
 		OldVersion: state.ConfigVersion,
-		NewVersion: m.Config,
+		NewVersion: effectiveConfigVersion,
 		Added:      added,
 		Removed:    removed,
 		Updated:    updated,
 		Unchanged:  unchanged,
 	}
 
-	if !opts.Force && !opts.DryRun && result.Added == 0 && result.Removed == 0 && result.Updated == 0 && state.ConfigVersion == m.Config {
+	if !opts.Force && !opts.DryRun && result.Added == 0 && result.Removed == 0 && result.Updated == 0 && state.ConfigVersion == effectiveConfigVersion {
 		logging.Infoln("Already up to date.")
 		return result, nil
 	}
@@ -87,10 +94,10 @@ func Run(ctx context.Context, opts Options) (*UpdateResult, error) {
 	if err := updateLwjgl3ifyIfNeeded(ctx, changes, state.Side, opts, rollback); err != nil {
 		return nil, err
 	}
-	if err := mergeConfigsIfNeeded(ctx, state, m, gameDir, db, opts, result, rollback); err != nil {
+	if err := mergeConfigsIfNeeded(ctx, state, m, gameDir, db, opts, result, rollback, effectiveConfigVersion); err != nil {
 		return nil, err
 	}
-	if err := persistUpdatedState(state, changes, m, mode, opts, db, extraDownloads, latestDownloads, rollback); err != nil {
+	if err := persistUpdatedState(state, changes, m, mode, opts, db, extraDownloads, latestDownloads, rollback, effectiveConfigVersion); err != nil {
 		return nil, err
 	}
 

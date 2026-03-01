@@ -336,13 +336,13 @@ func updateLwjgl3ifyIfNeeded(ctx context.Context, changes []diff.ModChange, side
 	return nil
 }
 
-func mergeConfigsIfNeeded(ctx context.Context, state *config.LocalState, m *manifest.DailyManifest, gameDir string, db *assets.AssetsDB, opts Options, result *UpdateResult, rollback func(error) error) error {
-	if state.ConfigVersion == m.Config {
+func mergeConfigsIfNeeded(ctx context.Context, state *config.LocalState, m *manifest.DailyManifest, gameDir string, db *assets.AssetsDB, opts Options, result *UpdateResult, rollback func(error) error, configVersion string) error {
+	if state.ConfigVersion == configVersion {
 		return nil
 	}
 
 	logging.Infoln("Merging configs...")
-	mergeResult, err := configmerge.MergeConfigs(ctx, gameDir, state.ConfigHashes, state.ConfigVersion, db, m.Config, opts.GithubToken)
+	mergeResult, err := configmerge.MergeConfigs(ctx, gameDir, state.ConfigHashes, state.ConfigVersion, db, configVersion, opts.GithubToken)
 	if err != nil {
 		return rollback(fmt.Errorf("config merge failed: %w", err))
 	}
@@ -354,7 +354,7 @@ func mergeConfigsIfNeeded(ctx context.Context, state *config.LocalState, m *mani
 	return nil
 }
 
-func persistUpdatedState(state *config.LocalState, changes []diff.ModChange, m *manifest.DailyManifest, mode string, opts Options, db *assets.AssetsDB, extraDownloads, latestDownloads map[string]resolvedExtra, rollback func(error) error) error {
+func persistUpdatedState(state *config.LocalState, changes []diff.ModChange, m *manifest.DailyManifest, mode string, opts Options, db *assets.AssetsDB, extraDownloads, latestDownloads map[string]resolvedExtra, rollback func(error) error, configVersion string) error {
 	for _, c := range changes {
 		switch c.Type {
 		case diff.Added, diff.Updated:
@@ -373,7 +373,7 @@ func persistUpdatedState(state *config.LocalState, changes []diff.ModChange, m *
 	}
 	logging.Debugf("Verbose: updated in-memory state mods=%d\n", len(state.Mods))
 
-	state.ConfigVersion = m.Config
+	state.ConfigVersion = configVersion
 	state.ManifestDate = m.LastUpdated
 	state.Mode = mode
 
