@@ -91,14 +91,6 @@ func Init(ctx context.Context, instanceDir, side, configVersion, mode, githubTok
 		return fmt.Errorf("scanning mods directory: %w", err)
 	}
 
-	// Determine config version
-	if configVersion == "" {
-		// Default to latest manifest's config version, but warn the user
-		configVersion = m.Config
-		logging.Infof("  No --config-version specified, assuming latest: %s\n", configVersion)
-		logging.Infoln("  If your instance is out of date, specify the correct version with --config-version")
-	}
-
 	// Hash files tracked by this modpack version (config + other managed files).
 	logging.Infoln("Hashing tracked modpack files...")
 	hashes, err := configmerge.ComputeTrackedFileHashes(ctx, gameDir, db, configVersion, githubToken)
