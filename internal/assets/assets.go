@@ -20,7 +20,8 @@ type AssetsDB struct {
 	Mods   []AssetEntry `json:"mods"`
 
 	// Index built after parsing
-	modIndex map[string]*AssetEntry
+	modIndex           map[string]*AssetEntry
+	versionFilenameIdx map[string]string // "ModName/version" → filename
 }
 
 type AssetEntry struct {
@@ -69,18 +70,27 @@ func Fetch(ctx context.Context) (*AssetsDB, error) {
 		return nil, fmt.Errorf("parsing assets: %w", err)
 	}
 
-	db.buildIndex()
+	db.BuildIndex()
 	return &db, nil
 }
 
-func (db *AssetsDB) buildIndex() {
+func (db *AssetsDB) BuildIndex() {
 	db.modIndex = make(map[string]*AssetEntry, len(db.Mods))
+	db.versionFilenameIdx = make(map[string]string)
 	for i := range db.Mods {
 		// Sort versions by semver descending so newest is first
 		slices.SortFunc(db.Mods[i].Versions, func(a, b VersionAsset) int {
 			return semver.Compare(b.VersionTag, a.VersionTag) // reversed for descending
 		})
 		db.modIndex[db.Mods[i].Name] = &db.Mods[i]
+		for _, v := range db.Mods[i].Versions {
+			key := db.Mods[i].Name + "/" + v.VersionTag
+			if v.Filename != "" {
+				db.versionFilenameIdx[key] = v.Filename
+			} else {
+				db.versionFilenameIdx[key] = maven.MavenFilename(db.Mods[i].Name, v.VersionTag)
+			}
+		}
 	}
 	// Sort config versions by semver descending so newest is first
 	slices.SortFunc(db.Config.Versions, func(a, b VersionAsset) int {
@@ -91,6 +101,13 @@ func (db *AssetsDB) buildIndex() {
 // LookupMod finds a mod by name in the index.
 func (db *AssetsDB) LookupMod(name string) *AssetEntry {
 	return db.modIndex[name]
+}
+
+// FilenameForVersion returns the expected jar filename for a mod at a given version.
+// Falls back to the Maven-style filename when no explicit filename is recorded.
+func (db *AssetsDB) FilenameForVersion(modName, version string) (string, bool) {
+	fn, ok := db.versionFilenameIdx[modName+"/"+version]
+	return fn, ok
 }
 
 // IsGTNH returns true if the mod is hosted by GTNewHorizons (Source == "").
