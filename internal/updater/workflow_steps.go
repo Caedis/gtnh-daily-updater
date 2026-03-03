@@ -156,6 +156,11 @@ func refreshTrackedMods(state *config.LocalState, db *assets.AssetsDB, m *manife
 		}
 	}
 
+	// Detect stale jars: manifest mods still unresolved that have a renamed or
+	// custom-version jar on disk. Pattern-match their expected filename against
+	// unclaimed disk jars so removeOutdatedJars can delete them later.
+	maps.Copy(scannedMods, detectStaleJars(allManifestMods, scannedMods, diskFiles, db))
+
 	state.Mods = scannedMods
 	logging.Debugf("Verbose: scanned installed mods=%d\n", len(scannedMods))
 	return nil

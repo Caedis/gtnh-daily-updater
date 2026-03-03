@@ -2,8 +2,12 @@ package updater
 
 import (
 	"io/fs"
+	"maps"
 	"os"
 	"path/filepath"
+	"regexp"
+	"slices"
+	"strings"
 
 	"github.com/caedis/gtnh-daily-updater/internal/assets"
 	"github.com/caedis/gtnh-daily-updater/internal/config"
@@ -93,6 +97,89 @@ func pickBestMatch(matches []assets.FilenameMatch, manifestMods map[string]manif
 
 	// Fall back to first match
 	return matches[0]
+}
+
+// buildVersionPattern constructs a case-insensitive regexp that matches any jar
+// filename that looks like the same mod but at a different version. It replaces
+// the first occurrence of the version string in the escaped filename with `.*`.
+// Returns false when the version string does not appear in the filename.
+func buildVersionPattern(filename, version string) (*regexp.Regexp, bool) {
+	if version == "" || !strings.Contains(filename, version) {
+		return nil, false
+	}
+	escaped := regexp.QuoteMeta(filename)
+	escapedVer := regexp.QuoteMeta(version)
+	patStr := strings.Replace(escaped, escapedVer, `.*`, 1)
+	return regexp.MustCompile(`(?i)^` + patStr + `$`), true
+}
+
+// detectStaleJars finds disk jars that belong to manifest mods not yet present
+// in scannedMods. It compares each unresolved mod's expected filename pattern
+// against unclaimed jars. Mods are processed in reverse alphabetical order so
+// that more-specific names (e.g. "BuildCraftCompat") claim their jars before
+// shorter prefix names (e.g. "buildcraft").
+func detectStaleJars(
+	manifestMods map[string]manifest.ModInfo,
+	scannedMods map[string]config.InstalledMod,
+	diskJars map[string]bool,
+	db *assets.AssetsDB,
+) map[string]config.InstalledMod {
+	result := make(map[string]config.InstalledMod)
+
+	// Collect manifest mods not yet accounted for in scannedMods.
+	var unresolved []string
+	for modName := range manifestMods {
+		if _, found := scannedMods[modName]; !found {
+			unresolved = append(unresolved, modName)
+		}
+	}
+	if len(unresolved) == 0 {
+		return result
+	}
+
+	// Reverse alpha order: longer/more-specific names claim jars first.
+	slices.Sort(unresolved)
+	slices.Reverse(unresolved)
+
+	// Build the set of already-claimed jar filenames.
+	claimedJars := make(map[string]bool, len(scannedMods))
+	for _, installed := range scannedMods {
+		if installed.Filename != "" {
+			claimedJars[installed.Filename] = true
+		}
+	}
+
+	// Sorted jar list for deterministic scanning.
+	jarList := slices.Sorted(maps.Keys(diskJars))
+
+	for _, modName := range unresolved {
+		info := manifestMods[modName]
+		filename, ok := db.FilenameForVersion(modName, info.Version)
+		if !ok {
+			continue
+		}
+		pat, ok := buildVersionPattern(filename, info.Version)
+		if !ok {
+			continue
+		}
+		for _, jar := range jarList {
+			if claimedJars[jar] {
+				continue
+			}
+			if pat.MatchString(jar) {
+				result[modName] = config.InstalledMod{
+					Version:  "",
+					Filename: jar,
+					Side:     info.Side,
+				}
+				claimedJars[jar] = true
+				logging.Debugf("Verbose: stale jar detected mod=%s pattern=%s matched=%s\n", modName, pat.String(), jar)
+				break
+			}
+		}
+	}
+
+	return result
 }
 
 func listTopLevelJarFiles(modsDir string) (map[string]bool, error) {
