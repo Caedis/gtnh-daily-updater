@@ -4,6 +4,10 @@ CLI tool for keeping an existing GregTech: New Horizons instance up to date with
 
 It tracks installed mods, downloads changes, and merges tracked pack files/config updates while preserving user edits when possible.
 
+## Warning
+If coming from the old gtnh-nightly-updater jar, it is best to start from scratch and manually copy any user added mods and config changes (as well as the other folders on the wiki page about updating)
+
+
 ## Features
 
 - Initializes tracking from an existing instance (`init`)
