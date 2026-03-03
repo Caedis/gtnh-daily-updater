@@ -5,15 +5,16 @@ CLI tool for keeping an existing GregTech: New Horizons instance up to date with
 It tracks installed mods, downloads changes, and merges tracked pack files/config updates while preserving user edits when possible.
 
 ## Warning
-This is only used for updating from a daily to a daily or an experimental to an experimental
+This is only used for updating from a daily to a daily or an experimental to an experimental  
 If coming from the old gtnh-nightly-updater jar, it is best to start from scratch and manually copy any user added mods and config changes (as well as the other folders on the wiki page about updating)
 
+Always make a full instance backup before first using this program
 
 ## Features
 
 - Initializes tracking from an existing instance (`init`)
 - Updates mods to manifest-pinned versions (`update`)
-- Optional `--latest` mode to use newest non-pre releases when available
+- Optional `--latest` mode to use newest non-pre releases when available (Only use if you know what you are doing)
 - Merges tracked pack files/configs between versions (writes `*.packnew` on conflicts)
 - Supports excluded mods and user-defined extra mods
 - Supports named profiles and multi-profile batch updates (`update-all`)
@@ -44,24 +45,25 @@ go install .
 
 1. Initialize state for an existing instance:
 
-```bash
-gtnh-daily-updater init \
-  --instance-dir "/path/to/instance" \
-  --side client
-```
-
-Use `--side server` for servers. For experimental packs:
-
-```bash
-gtnh-daily-updater init --instance-dir "/path/to/instance" --side client --mode experimental
-```
-
-If your instance is older than latest, pass the installed config version:
+Note: You MUST pass the current config version your instance has. It will not work correctly otherwise.  
+Config versions can be found at https://github.com/GTNewHorizons/GT-New-Horizons-Modpack/releases.
 
 ```bash
 gtnh-daily-updater init \
   --instance-dir "/path/to/instance" \
   --side client \
+  --config 2.9.0-nightly-2026-02-10
+```
+
+Use `--side server` for servers.
+
+For experimental packs:
+
+```bash
+gtnh-daily-updater init \
+  --instance-dir "/path/to/instance" \
+  --side client \
+  --mode experimental \
   --config 2.9.0-nightly-2026-02-10
 ```
 
@@ -120,6 +122,8 @@ Add extra mods from GitHub releases:
 ```bash
 gtnh-daily-updater extra add SomeMod --source github:Owner/Repo
 ```
+
+Note: Adding CurseForge extra mods requires a CurseForge API key  
 
 Add extra mods from CurseForge (latest release file):
 
