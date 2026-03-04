@@ -100,6 +100,7 @@ func Init(ctx context.Context, gameDir, side, configVersion string) error {
 	if err := runGit(ctx, repoDir, "add", "-A"); err != nil {
 		return fmt.Errorf("staging files: %w", err)
 	}
+	logStagedDiff(ctx, repoDir)
 	msg := fmt.Sprintf("Local state at init (%s)", configVersion)
 	if err := runGit(ctx, repoDir, "commit", "--allow-empty", "-m", msg); err != nil {
 		return fmt.Errorf("committing local state: %w", err)
@@ -122,6 +123,7 @@ func Snapshot(ctx context.Context, gameDir, side string) error {
 	if err := runGit(ctx, repoDir, "add", "-A"); err != nil {
 		return fmt.Errorf("staging files: %w", err)
 	}
+	logStagedDiff(ctx, repoDir)
 	if err := runGit(ctx, repoDir, "commit", "--allow-empty", "-m", "Snapshot player changes"); err != nil {
 		return fmt.Errorf("committing snapshot: %w", err)
 	}
@@ -148,6 +150,7 @@ func ApplyUpdate(ctx context.Context, gameDir, side, newConfigVersion string) er
 		return fmt.Errorf("merging config update: %w", err)
 	}
 
+	logStagedDiff(ctx, repoDir)
 	msg := fmt.Sprintf("Update configs to %s", newConfigVersion)
 	if err := runGit(ctx, repoDir, "commit", "--allow-empty", "-m", msg); err != nil {
 		return fmt.Errorf("committing config update: %w", err)
