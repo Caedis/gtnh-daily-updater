@@ -51,5 +51,5 @@ func logStagedDiff(ctx context.Context, dir string) {
 	if err != nil || stat == "" {
 		return
 	}
-	logging.Debugf("staged diff:\n%s", stat)
+	logging.Infof("staged diff:\n%s", stat)
 }
