@@ -68,6 +68,24 @@ func Init(ctx context.Context, instanceDir, side, configVersion, mode string) er
 	}
 	logging.Debugf("Verbose: identified %d tracked mods from mods directory\n", len(mods))
 
+	// Remove jar files for excluded mods
+	if len(excludeSet) > 0 {
+		allMods, err := scanInstalledMods(modsDir, filenameIdx, allManifestMods, nil, side)
+		if err != nil {
+			return fmt.Errorf("scanning mods for excluded jars: %w", err)
+		}
+		for name, installed := range allMods {
+			if !excludeSet[name] || installed.Filename == "" {
+				continue
+			}
+			jarPath := filepath.Join(modsDir, installed.Filename)
+			if err := os.Remove(jarPath); err != nil && !os.IsNotExist(err) {
+				return fmt.Errorf("removing excluded mod %s: %w", name, err)
+			}
+			logging.Infof("  - Removed excluded mod %s (%s)\n", name, installed.Filename)
+		}
+	}
+
 	// Collect unmatched jars for reporting
 	var unmatched []string
 	err = filepath.WalkDir(modsDir, func(path string, d fs.DirEntry, err error) error {
