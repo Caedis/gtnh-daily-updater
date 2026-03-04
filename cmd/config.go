@@ -1,11 +1,13 @@
 package cmd
 
 import (
+	"bytes"
 	"fmt"
+	"os/exec"
+	"path/filepath"
 
-	"github.com/caedis/gtnh-daily-updater/internal/assets"
 	stateconfig "github.com/caedis/gtnh-daily-updater/internal/config"
-	"github.com/caedis/gtnh-daily-updater/internal/configmerge"
+	"github.com/caedis/gtnh-daily-updater/internal/gitconfigs"
 	"github.com/caedis/gtnh-daily-updater/internal/logging"
 	"github.com/spf13/cobra"
 )
@@ -19,12 +21,12 @@ var configCmd = &cobra.Command{
 
 var configDiffCmd = &cobra.Command{
 	Use:   "diff [path]",
-	Short: "Show tracked file differences from the baseline",
-	Long: `Compare tracked pack files against the baseline hashes saved in
-.gtnh-daily-updater.json during init/update.
+	Short: "Show tracked config file differences from the pack baseline",
+	Long: `Compare tracked config files against the pack baseline using the git history
+in the .gtnh-configs/ repository.
 
-With a [path] argument, show a line diff for one file against the tracked
-config pack version (supports both config-relative and config/ prefixed paths).`,
+With a [path] argument, show the diff for that specific file.
+Without arguments, shows git diff output of local changes vs. the pack baseline.`,
 	Args: usageArgs(cobra.MaximumNArgs(1)),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		state, err := stateconfig.Load(instanceDir)
@@ -32,101 +34,64 @@ config pack version (supports both config-relative and config/ prefixed paths).`
 			return err
 		}
 
+		gameDir := stateconfig.GameDir(instanceDir)
+		repoDir := gitconfigs.ConfigRepoDir(gameDir)
+
+		// Build git diff command: compare local branch to the pack tag
+		gitArgs := []string{"diff", state.ConfigVersion + ".." + gitconfigs.LocalBranch}
 		if len(args) == 1 {
-			return runConfigSingleFileDiff(cmd, state, args[0])
+			gitArgs = append(gitArgs, "--", resolveConfigPath(args[0]))
+		} else if !configDiffAll {
+			gitArgs = append(gitArgs, "--stat")
 		}
 
-		return runConfigSummaryDiff(state)
+		out, err := runGitDiff(repoDir, gitArgs)
+		if err != nil {
+			return fmt.Errorf("git diff: %w", err)
+		}
+
+		if out == "" {
+			logging.Infoln("No tracked file differences from pack baseline.")
+			return nil
+		}
+
+		logging.Infoln(out)
+		return nil
 	},
 }
 
-func runConfigSummaryDiff(state *stateconfig.LocalState) error {
-	gameDir := stateconfig.GameDir(instanceDir)
-	diffs, err := configmerge.DiffConfigFiles(gameDir, state.ConfigHashes, configDiffAll)
-	if err != nil {
-		return fmt.Errorf("diffing configs: %w", err)
+func resolveConfigPath(p string) string {
+	// Allow both "config/foo.cfg" and "foo.cfg" (relative to config/)
+	if filepath.IsAbs(p) {
+		return p
 	}
-
-	if len(diffs) == 0 {
-		logging.Infoln("No tracked file differences from baseline.")
-		return nil
-	}
-
-	added := 0
-	removed := 0
-	modified := 0
-	unchanged := 0
-
-	logging.Infoln("Tracked file differences:")
-	for _, d := range diffs {
-		switch d.Status {
-		case configmerge.DiffAdded:
-			added++
-			logging.Infof("  + %s\n", d.Path)
-		case configmerge.DiffRemoved:
-			removed++
-			logging.Infof("  - %s\n", d.Path)
-		case configmerge.DiffModified:
-			modified++
-			logging.Infof("  ~ %s\n", d.Path)
-		case configmerge.DiffUnchanged:
-			unchanged++
-			logging.Infof("  = %s\n", d.Path)
+	// Check if it already starts with a tracked dir name
+	for _, prefix := range []string{"config/", "journeymap/", "resourcepacks/", "serverutilities/"} {
+		if len(p) >= len(prefix) && p[:len(prefix)] == prefix {
+			return p
 		}
 	}
-
-	logging.Infof(
-		"\nSummary: %d added, %d removed, %d modified",
-		added, removed, modified,
-	)
-	if configDiffAll {
-		logging.Infof(", %d unchanged", unchanged)
-	}
-	logging.Infoln()
-
-	return nil
+	// Default to config/ prefix
+	return filepath.Join("config", p)
 }
 
-func runConfigSingleFileDiff(cmd *cobra.Command, state *stateconfig.LocalState, requestedPath string) error {
-	logging.Infoln("Fetching assets database...")
-	db, err := assets.Fetch(cmd.Context())
-	if err != nil {
-		return fmt.Errorf("fetching assets DB: %w", err)
+func runGitDiff(repoDir string, args []string) (string, error) {
+	cmd := exec.Command("git", args...)
+	cmd.Dir = repoDir
+	var out, stderr bytes.Buffer
+	cmd.Stdout = &out
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		if stderr.Len() > 0 {
+			return "", fmt.Errorf("%w\n%s", err, stderr.String())
+		}
+		return "", err
 	}
-
-	gameDir := stateconfig.GameDir(instanceDir)
-	result, err := configmerge.DiffFileAgainstConfigVersion(
-		cmd.Context(),
-		gameDir,
-		db,
-		state.ConfigVersion,
-		getGithubToken(),
-		requestedPath,
-	)
-	if err != nil {
-		return fmt.Errorf("diffing file %q: %w", requestedPath, err)
-	}
-
-	switch result.Status {
-	case configmerge.DiffUnchanged:
-		logging.Infof("No differences for %s (config %s).\n", result.ResolvedPath, state.ConfigVersion)
-	case configmerge.DiffAdded:
-		logging.Infof("File added locally: %s\n", result.ResolvedPath)
-	case configmerge.DiffRemoved:
-		logging.Infof("File removed locally: %s\n", result.ResolvedPath)
-	case configmerge.DiffModified:
-		logging.Infof("File modified locally: %s\n", result.ResolvedPath)
-	}
-
-	if result.Diff != "" {
-		logging.Infoln(result.Diff)
-	}
-
-	return nil
+	return out.String(), nil
 }
 
 func init() {
-	configDiffCmd.Flags().BoolVar(&configDiffAll, "all", false, "Include unchanged files")
+	configDiffCmd.Flags().BoolVar(&configDiffAll, "all", false, "Show full diff instead of --stat summary")
 
 	configCmd.AddCommand(configDiffCmd)
 	rootCmd.AddCommand(configCmd)

@@ -29,16 +29,15 @@ type Options struct {
 }
 
 type UpdateResult struct {
-	OldVersion     string
-	NewVersion     string
-	Added          int
-	Removed        int
-	Updated        int
-	Unchanged      int
-	ConfigMerged   int
-	ConfigConflict int
-	ConflictFiles  []string
-	Skipped        []string
+	OldVersion    string
+	NewVersion    string
+	Added         int
+	Removed       int
+	Updated       int
+	Unchanged     int
+	ConfigUpdated bool
+	ConfigSkipped bool
+	Skipped       []string
 }
 
 // resolvedExtra holds download info for an extra mod resolved before download.

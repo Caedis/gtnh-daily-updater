@@ -6,6 +6,7 @@ import (
 
 	"github.com/caedis/gtnh-daily-updater/internal/config"
 	"github.com/caedis/gtnh-daily-updater/internal/diff"
+	"github.com/caedis/gtnh-daily-updater/internal/github"
 	"github.com/caedis/gtnh-daily-updater/internal/logging"
 )
 
@@ -48,8 +49,13 @@ func Run(ctx context.Context, opts Options) (*UpdateResult, error) {
 
 	effectiveConfigVersion := m.Config
 	if opts.Latest {
-		if lv := db.LatestNonPreConfigVersion(); lv != "" {
+		if lv, err := github.FetchLatestReleaseTag(ctx, "GTNewHorizons/GT-New-Horizons-Modpack", opts.GithubToken); err == nil {
 			effectiveConfigVersion = lv
+		} else {
+			logging.Debugf("Failed to fetch latest config version from GitHub (%v), falling back to assets DB\n", err)
+			if lv := db.LatestNonPreConfigVersion(); lv != "" {
+				effectiveConfigVersion = lv
+			}
 		}
 	}
 
@@ -94,10 +100,10 @@ func Run(ctx context.Context, opts Options) (*UpdateResult, error) {
 	if err := updateLwjgl3ifyIfNeeded(ctx, changes, state.Side, opts, rollback); err != nil {
 		return nil, err
 	}
-	if err := mergeConfigsIfNeeded(ctx, state, m, gameDir, db, opts, result, rollback, effectiveConfigVersion); err != nil {
+	if err := snapshotAndUpdateConfigsIfNeeded(ctx, state, gameDir, result, rollback, effectiveConfigVersion); err != nil {
 		return nil, err
 	}
-	if err := persistUpdatedState(state, changes, m, mode, opts, db, extraDownloads, latestDownloads, rollback, effectiveConfigVersion); err != nil {
+	if err := persistUpdatedState(state, changes, m, mode, opts, db, extraDownloads, latestDownloads, rollback, effectiveConfigVersion, result); err != nil {
 		return nil, err
 	}
 

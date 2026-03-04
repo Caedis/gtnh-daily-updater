@@ -28,7 +28,6 @@ func TestRun_DoesNotShortCircuitOnManifestTimestampWithLatest(t *testing.T) {
 		Side:          "client",
 		ManifestDate:  "2026-02-20",
 		ConfigVersion: "cfg-1",
-		ConfigHashes:  map[string]string{},
 		Mods: map[string]config.InstalledMod{
 			"TestMod": {
 				Version:  "1.0.0",
@@ -107,7 +106,6 @@ func TestRun_UsesExperimentalManifestFromState(t *testing.T) {
 		Mode:          "experimental",
 		ManifestDate:  "2026-02-20",
 		ConfigVersion: "cfg-exp-1",
-		ConfigHashes:  map[string]string{},
 		Mods:          map[string]config.InstalledMod{},
 	}
 	if err := state.Save(instanceDir); err != nil {
@@ -175,7 +173,6 @@ func TestRun_LatestDowngradeResolvedBackToInstalledBecomesUnchanged(t *testing.T
 		Side:          "client",
 		ManifestDate:  "2026-02-19",
 		ConfigVersion: "cfg-1",
-		ConfigHashes:  map[string]string{},
 		Mods: map[string]config.InstalledMod{
 			"TestMod": {
 				Version:  "1.1.0",
@@ -258,7 +255,6 @@ func TestRun_RemovesExcludedInstalledMod(t *testing.T) {
 		Side:          "client",
 		ManifestDate:  "2026-02-19",
 		ConfigVersion: "cfg-1",
-		ConfigHashes:  map[string]string{},
 		Mods: map[string]config.InstalledMod{
 			"TestMod": {
 				Version:  "1.0.0",
@@ -345,7 +341,6 @@ func TestRun_LatestOutOfAssetsDBIsNotRepeatedlyAdded(t *testing.T) {
 		Side:          "client",
 		ManifestDate:  "2026-02-19",
 		ConfigVersion: "cfg-1",
-		ConfigHashes:  map[string]string{},
 		Mods: map[string]config.InstalledMod{
 			"TestMod": {
 				Version:  "2.0.0",
@@ -419,7 +414,6 @@ func TestRun_GitHubDownloadFailureFallsBackToMaven(t *testing.T) {
 		Side:          "client",
 		ManifestDate:  "2026-02-19",
 		ConfigVersion: "cfg-1",
-		ConfigHashes:  map[string]string{},
 		Mods:          map[string]config.InstalledMod{},
 	}
 	if err := state.Save(instanceDir); err != nil {
@@ -604,7 +598,6 @@ func TestStatus_ResolvesUnpinnedExtraVersionsBeforeDiff(t *testing.T) {
 		Side:          "client",
 		ManifestDate:  "2026-02-19",
 		ConfigVersion: "cfg-1",
-		ConfigHashes:  map[string]string{},
 		Mods: map[string]config.InstalledMod{
 			"ExtraMod": {Version: "1.0.0", Filename: "ExtraMod-1.0.0.jar", Side: "BOTH"},
 		},

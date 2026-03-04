@@ -2,7 +2,7 @@
 
 CLI tool for keeping an existing GregTech: New Horizons instance up to date with GTNH daily or experimental manifests.
 
-It tracks installed mods, downloads changes, and merges tracked pack files/config updates while preserving user edits when possible.
+It tracks installed mods, downloads changes, and applies config updates using git to merge pack changes while preserving user edits.
 
 ## Warning
 This is only used for updating from a daily to a daily or an experimental to an experimental  
@@ -15,7 +15,7 @@ Always make a full instance backup before first using this program
 - Initializes tracking from an existing instance (`init`)
 - Updates mods to manifest-pinned versions (`update`)
 - Optional `--latest` mode to use newest non-pre releases when available (Only use if you know what you are doing)
-- Merges tracked pack files/configs between versions (writes `*.packnew` on conflicts)
+- Tracks config files with a local git branch; merges pack updates automatically (pack wins on conflicts)
 - Supports excluded mods and user-defined extra mods
 - Supports named profiles and multi-profile batch updates (`update-all`)
 - Download caching and configurable concurrency
@@ -25,6 +25,7 @@ Always make a full instance backup before first using this program
 - Go 1.25+ (for building/running from source)
 - Existing GTNH instance directory
 - Network access to GTNH manifests/assets and mod download sources
+- Git (for config updates, skipped if missing)
 - Optional `GITHUB_TOKEN` for private GitHub downloads or higher API limits
 
 ## Installation
@@ -171,9 +172,11 @@ gtnh-daily-updater update-all main-client alt-server
 - Local state is stored at `<instance-dir>/.gtnh-daily-updater.json`
 - On Prism/MultiMC layouts, game files are resolved under `<instance-dir>/.minecraft/`
 - On server/other layouts, game files are resolved directly under `<instance-dir>/`
-- During pack-file merge conflicts, updater keeps your file and writes pack version as `*.packnew`
-- `config diff` compares current tracked files against stored baseline hashes from the last init/update
-- `config diff "GregTech/Pollution.cfg"` shows line differences for one file against the tracked config pack version
+- Config files are tracked in a git repo at `<game-dir>/.gtnh-configs/` on a `local` branch; pack updates are applied via `git merge -X theirs` (pack wins on conflicts)
+- Tracked items: `config/`, `journeymap/` (preserving `data/`), `resourcepacks/` (client only), `serverutilities/`, `servers.json` (client only)
+- `config diff` shows your changes relative to the pack version (`git diff <configVersion>..local`)
+- `config diff "GregTech/Pollution.cfg"` shows diff for a specific file (also accepts `config/GregTech/Pollution.cfg`)
+- Config tracking requires git; config updates are skipped gracefully if git is unavailable or the repo hasn't been initialized yet
 
 ## Caching and Performance
 
@@ -182,6 +185,7 @@ gtnh-daily-updater update-all main-client alt-server
 - Disable cache with `--no-cache`
 - Override cache location with `--cache-dir`
 - Control parallel downloads with `--concurrency` (default: `6`)
+- Logs are written to `${XDG_CACHE_HOME:-~/.cache}/gtnh-daily-updater/logs/<timestamp>.log`; debug output is always written to the log file regardless of the `-v` flag
 
 ## GitHub Token
 

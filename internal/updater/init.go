@@ -6,10 +6,12 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/caedis/gtnh-daily-updater/internal/assets"
 	"github.com/caedis/gtnh-daily-updater/internal/config"
-	"github.com/caedis/gtnh-daily-updater/internal/configmerge"
+	"github.com/caedis/gtnh-daily-updater/internal/fileutil"
+	"github.com/caedis/gtnh-daily-updater/internal/gitconfigs"
 	"github.com/caedis/gtnh-daily-updater/internal/logging"
 	"github.com/caedis/gtnh-daily-updater/internal/manifest"
 )
@@ -17,7 +19,7 @@ import (
 // Init initializes tracking for an existing GTNH installation.
 // It scans the mods/ directory and matches jar filenames against the assets DB
 // to determine what's actually installed, rather than assuming the latest manifest.
-func Init(ctx context.Context, instanceDir, side, configVersion, mode, githubToken string) error {
+func Init(ctx context.Context, instanceDir, side, configVersion, mode string) error {
 	if side != "client" && side != "server" {
 		return fmt.Errorf("side must be 'client' or 'server'")
 	}
@@ -25,7 +27,7 @@ func Init(ctx context.Context, instanceDir, side, configVersion, mode, githubTok
 	if err != nil {
 		return err
 	}
-	logging.Debugf("Verbose: init start instance=%q side=%s mode=%s config-version=%q github-token=%t\n", instanceDir, side, resolvedMode, configVersion, githubToken != "")
+	logging.Debugf("Verbose: init start instance=%q side=%s mode=%s config-version=%q\n", instanceDir, side, resolvedMode, configVersion)
 
 	logging.Infoln("Fetching assets database...")
 	db, err := assets.Fetch(ctx)
@@ -36,6 +38,11 @@ func Init(ctx context.Context, instanceDir, side, configVersion, mode, githubTok
 
 	// Resolve game directory (mods/ and config/ location)
 	gameDir := config.GameDir(instanceDir)
+
+	logging.Infoln("Backing up mods directory...")
+	if err := backupModsDir(gameDir, instanceDir); err != nil {
+		return fmt.Errorf("backing up mods: %w", err)
+	}
 
 	// Build reverse index: filename -> mod matches
 	logging.Infoln("Scanning mods directory...")
@@ -68,6 +75,24 @@ func Init(ctx context.Context, instanceDir, side, configVersion, mode, githubTok
 	}
 	logging.Debugf("Verbose: identified %d tracked mods from mods directory\n", len(mods))
 
+	// Remove jar files for excluded mods
+	if len(excludeSet) > 0 {
+		allMods, err := scanInstalledMods(modsDir, filenameIdx, allManifestMods, nil, side)
+		if err != nil {
+			return fmt.Errorf("scanning mods for excluded jars: %w", err)
+		}
+		for name, installed := range allMods {
+			if !excludeSet[name] || installed.Filename == "" {
+				continue
+			}
+			jarPath := filepath.Join(modsDir, installed.Filename)
+			if err := os.Remove(jarPath); err != nil && !os.IsNotExist(err) {
+				return fmt.Errorf("removing excluded mod %s: %w", name, err)
+			}
+			logging.Infof("  - Removed excluded mod %s (%s)\n", name, installed.Filename)
+		}
+	}
+
 	// Collect unmatched jars for reporting
 	var unmatched []string
 	err = filepath.WalkDir(modsDir, func(path string, d fs.DirEntry, err error) error {
@@ -91,18 +116,15 @@ func Init(ctx context.Context, instanceDir, side, configVersion, mode, githubTok
 		return fmt.Errorf("scanning mods directory: %w", err)
 	}
 
-	// Hash files tracked by this modpack version (config + other managed files).
-	logging.Infoln("Hashing tracked modpack files...")
-	hashes, err := configmerge.ComputeTrackedFileHashes(ctx, gameDir, db, configVersion, githubToken)
-	if err != nil {
-		logging.Infof("  Warning: could not hash full modpack file set for %s: %v\n", configVersion, err)
-		logging.Infoln("  Falling back to config-only hashing for this init run.")
-		hashes, err = configmerge.ComputeConfigHashes(gameDir)
-		if err != nil {
-			return fmt.Errorf("hashing configs: %w", err)
+	// Initialize git-backed config tracking
+	if !gitconfigs.IsGitAvailable() {
+		logging.Infoln("  Warning: git not found — skipping config tracking. Install git to enable this feature.")
+	} else {
+		logging.Infoln("Initializing config git repo...")
+		if err := gitconfigs.Init(ctx, gameDir, side, configVersion); err != nil {
+			return fmt.Errorf("initializing config repo: %w", err)
 		}
 	}
-	logging.Debugf("Verbose: computed %d tracked file hashes\n", len(hashes))
 
 	// We don't set ManifestDate so the next update will always detect changes
 	state := &config.LocalState{
@@ -110,7 +132,6 @@ func Init(ctx context.Context, instanceDir, side, configVersion, mode, githubTok
 		Mode:          resolvedMode,
 		ManifestDate:  "", // empty = force update on next run
 		ConfigVersion: configVersion,
-		ConfigHashes:  hashes,
 		Mods:          mods,
 	}
 
@@ -141,4 +162,17 @@ func Init(ctx context.Context, instanceDir, side, configVersion, mode, githubTok
 	}
 	logging.Infoln("\nRun 'update' to bring the instance up to date.")
 	return nil
+}
+
+func backupModsDir(gameDir, instanceDir string) error {
+	modsDir := filepath.Join(gameDir, "mods")
+	if _, err := os.Stat(modsDir); os.IsNotExist(err) {
+		return nil
+	}
+	backupDir := filepath.Join(instanceDir, ".gtnh-mods-backup-"+time.Now().Format("2006-01-02"))
+	if err := os.RemoveAll(backupDir); err != nil {
+		return fmt.Errorf("clearing old mods backup: %w", err)
+	}
+	logging.Infof("  Backed up mods to %s\n", backupDir)
+	return fileutil.CopyDir(modsDir, backupDir)
 }

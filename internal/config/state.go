@@ -15,7 +15,6 @@ type LocalState struct {
 	Mode          string                  `json:"mode,omitempty"`
 	ManifestDate  string                  `json:"manifest_date"`
 	ConfigVersion string                  `json:"config_version"`
-	ConfigHashes  map[string]string       `json:"config_hashes"`
 	Mods          map[string]InstalledMod `json:"mods"`
 	ExcludeMods   []string                `json:"exclude_mods,omitempty"`
 	ExtraMods     map[string]ExtraModSpec `json:"extra_mods,omitempty"`
@@ -68,9 +67,6 @@ func Load(instanceDir string) (*LocalState, error) {
 		state.Mode = legacy.ManifestTrack
 	}
 
-	if state.ConfigHashes == nil {
-		state.ConfigHashes = make(map[string]string)
-	}
 	if state.Mods == nil {
 		state.Mods = make(map[string]InstalledMod)
 	}
@@ -82,6 +78,9 @@ func Load(instanceDir string) (*LocalState, error) {
 // On Prism/MultiMC clients, this is <instanceDir>/.minecraft/.
 // On servers and other layouts, this is just instanceDir.
 func GameDir(instanceDir string) string {
+	if abs, err := filepath.Abs(instanceDir); err == nil {
+		instanceDir = abs
+	}
 	dotMC := filepath.Join(instanceDir, ".minecraft")
 	if info, err := os.Stat(dotMC); err == nil && info.IsDir() {
 		return dotMC

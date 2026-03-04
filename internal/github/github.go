@@ -158,6 +158,31 @@ func selectLatestResult(releases []Release, token string) (*LatestResult, error)
 	return best, nil
 }
 
+// FetchLatestReleaseTag returns the latest non-prerelease tag from a GitHub repo.
+// Unlike FetchLatestRelease, it does not require a .jar asset.
+func FetchLatestReleaseTag(ctx context.Context, repo, token string) (string, error) {
+	apiURL := fmt.Sprintf("https://api.github.com/repos/%s/releases?per_page=%d", repo, releasesPerPage)
+	releases, err := fetchReleases(ctx, apiURL, token)
+	if err != nil {
+		return "", err
+	}
+
+	var best string
+	for _, rel := range releases {
+		tag := strings.TrimSpace(rel.TagName)
+		if tag == "" || rel.Prerelease || isPreReleaseTag(tag) {
+			continue
+		}
+		if best == "" || semver.Compare(tag, best) > 0 {
+			best = tag
+		}
+	}
+	if best == "" {
+		return "", fmt.Errorf("repo %s: no non-prerelease found", repo)
+	}
+	return best, nil
+}
+
 func isPreReleaseTag(tag string) bool {
 	return strings.HasSuffix(strings.ToLower(strings.TrimSpace(tag)), "-pre")
 }

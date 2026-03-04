@@ -11,9 +11,9 @@ import (
 
 	"github.com/caedis/gtnh-daily-updater/internal/assets"
 	"github.com/caedis/gtnh-daily-updater/internal/config"
-	"github.com/caedis/gtnh-daily-updater/internal/configmerge"
 	"github.com/caedis/gtnh-daily-updater/internal/diff"
 	"github.com/caedis/gtnh-daily-updater/internal/downloader"
+	"github.com/caedis/gtnh-daily-updater/internal/gitconfigs"
 	"github.com/caedis/gtnh-daily-updater/internal/logging"
 	"github.com/caedis/gtnh-daily-updater/internal/lwjgl3ify"
 	"github.com/caedis/gtnh-daily-updater/internal/manifest"
@@ -341,25 +341,39 @@ func updateLwjgl3ifyIfNeeded(ctx context.Context, changes []diff.ModChange, side
 	return nil
 }
 
-func mergeConfigsIfNeeded(ctx context.Context, state *config.LocalState, m *manifest.DailyManifest, gameDir string, db *assets.AssetsDB, opts Options, result *UpdateResult, rollback func(error) error, configVersion string) error {
+func snapshotAndUpdateConfigsIfNeeded(ctx context.Context, state *config.LocalState, gameDir string, result *UpdateResult, rollback func(error) error, configVersion string) error {
+	if !gitconfigs.IsGitAvailable() {
+		logging.Infof("  Warning: git not found — skipping config snapshot/update.\n")
+		return nil
+	}
+	repoDir := gitconfigs.ConfigRepoDir(gameDir)
+	if _, err := os.Stat(repoDir); os.IsNotExist(err) {
+		if state.ConfigVersion != configVersion {
+			logging.Infof("  Warning: config update skipped — run 'init' and pass the last known config version that was used to `--config`\n")
+			result.ConfigSkipped = true
+		}
+		return nil
+	}
+
+	// Always snapshot to capture player changes since last run
+	if err := gitconfigs.Snapshot(ctx, gameDir, state.Side); err != nil {
+		return rollback(fmt.Errorf("snapshotting configs: %w", err))
+	}
+
+	// Only apply pack update if config version changed
 	if state.ConfigVersion == configVersion {
 		return nil
 	}
 
-	logging.Infoln("Merging configs...")
-	mergeResult, err := configmerge.MergeConfigs(ctx, gameDir, state.ConfigHashes, state.ConfigVersion, db, configVersion, opts.GithubToken)
-	if err != nil {
-		return rollback(fmt.Errorf("config merge failed: %w", err))
+	logging.Infoln("Updating configs...")
+	if err := gitconfigs.ApplyUpdate(ctx, gameDir, state.Side, configVersion); err != nil {
+		return rollback(fmt.Errorf("applying config update: %w", err))
 	}
-
-	result.ConfigMerged = mergeResult.FilesMerged + mergeResult.FilesUpdated
-	result.ConfigConflict = mergeResult.FilesConflict
-	result.ConflictFiles = mergeResult.ConflictFiles
-	state.ConfigHashes = mergeResult.NewHashes
+	result.ConfigUpdated = true
 	return nil
 }
 
-func persistUpdatedState(state *config.LocalState, changes []diff.ModChange, m *manifest.DailyManifest, mode string, opts Options, db *assets.AssetsDB, extraDownloads, latestDownloads map[string]resolvedExtra, rollback func(error) error, configVersion string) error {
+func persistUpdatedState(state *config.LocalState, changes []diff.ModChange, m *manifest.DailyManifest, mode string, opts Options, db *assets.AssetsDB, extraDownloads, latestDownloads map[string]resolvedExtra, rollback func(error) error, configVersion string, result *UpdateResult) error {
 	for _, c := range changes {
 		switch c.Type {
 		case diff.Added, diff.Updated:
@@ -378,7 +392,9 @@ func persistUpdatedState(state *config.LocalState, changes []diff.ModChange, m *
 	}
 	logging.Debugf("Verbose: updated in-memory state mods=%d\n", len(state.Mods))
 
-	state.ConfigVersion = configVersion
+	if !result.ConfigSkipped {
+		state.ConfigVersion = configVersion
+	}
 	state.ManifestDate = m.LastUpdated
 	state.Mode = mode
 

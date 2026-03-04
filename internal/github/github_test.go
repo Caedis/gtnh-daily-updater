@@ -180,6 +180,108 @@ func TestFetchLatestRelease(t *testing.T) {
 	}
 }
 
+func TestFetchLatestReleaseTag(t *testing.T) {
+	t.Parallel()
+
+	t.Run("returns highest semver non-prerelease tag", func(t *testing.T) {
+		releases := []Release{
+			{TagName: "2.7.0", Prerelease: false},
+			{TagName: "2.7.1", Prerelease: false},
+			{TagName: "2.8.0-pre", Prerelease: false},
+			{TagName: "2.6.0", Prerelease: true},
+		}
+		server := newTagServer(t, releases)
+		defer server.Close()
+
+		got, err := FetchLatestReleaseTag(context.Background(), "owner/repo", "")
+		if err != nil {
+			t.Fatalf("FetchLatestReleaseTag failed: %v", err)
+		}
+		if got != "2.7.1" {
+			t.Fatalf("tag=%q want=2.7.1", got)
+		}
+	})
+
+	t.Run("skips prerelease flag and -pre suffix tags", func(t *testing.T) {
+		releases := []Release{
+			{TagName: "1.0.0-pre", Prerelease: false},
+			{TagName: "1.1.0", Prerelease: true},
+			{TagName: "0.9.0", Prerelease: false},
+		}
+		server := newTagServer(t, releases)
+		defer server.Close()
+
+		got, err := FetchLatestReleaseTag(context.Background(), "owner/repo", "")
+		if err != nil {
+			t.Fatalf("FetchLatestReleaseTag failed: %v", err)
+		}
+		if got != "0.9.0" {
+			t.Fatalf("tag=%q want=0.9.0", got)
+		}
+	})
+
+	t.Run("returns error when no non-prerelease found", func(t *testing.T) {
+		releases := []Release{
+			{TagName: "1.0.0-pre", Prerelease: false},
+			{TagName: "2.0.0", Prerelease: true},
+		}
+		server := newTagServer(t, releases)
+		defer server.Close()
+
+		_, err := FetchLatestReleaseTag(context.Background(), "owner/repo", "")
+		if err == nil {
+			t.Fatal("expected error, got nil")
+		}
+	})
+
+	t.Run("returns error on HTTP failure", func(t *testing.T) {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.WriteHeader(http.StatusInternalServerError)
+		}))
+		defer server.Close()
+
+		parsed, err := url.Parse(server.URL)
+		if err != nil {
+			t.Fatalf("url.Parse: %v", err)
+		}
+
+		oldClient := githubHTTPClient
+		githubHTTPClient = &http.Client{
+			Transport: &rewriteHostTransport{host: parsed.Host, rt: server.Client().Transport},
+		}
+		t.Cleanup(func() { githubHTTPClient = oldClient })
+
+		_, err = FetchLatestReleaseTag(context.Background(), "owner/repo", "")
+		if err == nil {
+			t.Fatal("expected error, got nil")
+		}
+	})
+}
+
+// newTagServer creates a test server returning the given releases and overrides githubHTTPClient.
+func newTagServer(t *testing.T, releases []Release) *httptest.Server {
+	t.Helper()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		if err := json.NewEncoder(w).Encode(releases); err != nil {
+			t.Errorf("encoding response: %v", err)
+		}
+	}))
+
+	parsed, err := url.Parse(server.URL)
+	if err != nil {
+		t.Fatalf("url.Parse: %v", err)
+	}
+
+	oldClient := githubHTTPClient
+	githubHTTPClient = &http.Client{
+		Transport: &rewriteHostTransport{host: parsed.Host, rt: server.Client().Transport},
+	}
+	t.Cleanup(func() { githubHTTPClient = oldClient })
+
+	return server
+}
+
 type rewriteHostTransport struct {
 	host string
 	rt   http.RoundTripper
