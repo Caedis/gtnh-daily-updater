@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/caedis/gtnh-daily-updater/internal/fileutil"
@@ -155,20 +156,54 @@ func ApplyUpdate(ctx context.Context, gameDir, side, newConfigVersion string) er
 	}
 	logging.Debugf("Verbose: gitconfigs merge committed, replacing instance files\n")
 
-	// Atomically replace instance dirs from repo
-	if err := atomicReplaceFromRepo(gameDir, repoDir, side); err != nil {
-		return fmt.Errorf("applying updated configs: %w", err)
+	// Atomically replace only changed instance dirs from repo
+	changedOut, err := runGitOutput(ctx, repoDir, "diff", "--name-only", "HEAD~1", "HEAD")
+	if err != nil {
+		logging.Debugf("Verbose: gitconfigs could not determine changed files, replacing all: %v\n", err)
+		if err := atomicReplaceFromRepo(gameDir, repoDir, trackedItems(side)); err != nil {
+			return fmt.Errorf("applying updated configs: %w", err)
+		}
+	} else {
+		items := filterChangedItems(trackedItems(side), strings.Fields(changedOut))
+		if len(items) == 0 {
+			logging.Debugf("Verbose: gitconfigs merge changed no tracked items, skipping file replacement\n")
+		} else {
+			logging.Debugf("Verbose: gitconfigs replacing %d changed tracked item(s)\n", len(items))
+			if err := atomicReplaceFromRepo(gameDir, repoDir, items); err != nil {
+				return fmt.Errorf("applying updated configs: %w", err)
+			}
+		}
 	}
 	logging.Debugf("Verbose: gitconfigs apply-update complete\n")
 
 	return nil
 }
 
-// atomicReplaceFromRepo copies tracked items from repoDir back to gameDir atomically.
+// filterChangedItems returns only the items that have at least one path in changedPaths.
+func filterChangedItems(items []trackedItem, changedPaths []string) []trackedItem {
+	var result []trackedItem
+	for _, item := range items {
+		for _, p := range changedPaths {
+			if item.IsFile {
+				if p == item.Name {
+					result = append(result, item)
+					break
+				}
+			} else {
+				if strings.HasPrefix(p, item.Name+"/") || p == item.Name {
+					result = append(result, item)
+					break
+				}
+			}
+		}
+	}
+	return result
+}
+
+// atomicReplaceFromRepo copies the given items from repoDir back to gameDir atomically.
 // For each item: rename existing to .bak, copy from repo, remove .bak on success.
 // On failure: restore from .bak.
-func atomicReplaceFromRepo(gameDir, repoDir, side string) error {
-	items := trackedItems(side)
+func atomicReplaceFromRepo(gameDir, repoDir string, items []trackedItem) error {
 	var backed []string
 
 	rollback := func() {
