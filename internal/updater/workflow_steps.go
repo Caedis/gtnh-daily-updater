@@ -344,7 +344,10 @@ func updateLwjgl3ifyIfNeeded(ctx context.Context, changes []diff.ModChange, side
 func snapshotAndUpdateConfigsIfNeeded(ctx context.Context, state *config.LocalState, gameDir string, result *UpdateResult, rollback func(error) error, configVersion string) error {
 	repoDir := gitconfigs.ConfigRepoDir(gameDir)
 	if _, err := os.Stat(repoDir); os.IsNotExist(err) {
-		// Config repo not initialized (e.g. migrating from old state) — skip silently.
+		if state.ConfigVersion != configVersion {
+			logging.Infof("  Warning: config update skipped — run 'init --config %s' to set up config tracking\n", configVersion)
+			result.ConfigSkipped = true
+		}
 		return nil
 	}
 
@@ -366,7 +369,7 @@ func snapshotAndUpdateConfigsIfNeeded(ctx context.Context, state *config.LocalSt
 	return nil
 }
 
-func persistUpdatedState(state *config.LocalState, changes []diff.ModChange, m *manifest.DailyManifest, mode string, opts Options, db *assets.AssetsDB, extraDownloads, latestDownloads map[string]resolvedExtra, rollback func(error) error, configVersion string) error {
+func persistUpdatedState(state *config.LocalState, changes []diff.ModChange, m *manifest.DailyManifest, mode string, opts Options, db *assets.AssetsDB, extraDownloads, latestDownloads map[string]resolvedExtra, rollback func(error) error, configVersion string, result *UpdateResult) error {
 	for _, c := range changes {
 		switch c.Type {
 		case diff.Added, diff.Updated:
@@ -385,7 +388,9 @@ func persistUpdatedState(state *config.LocalState, changes []diff.ModChange, m *
 	}
 	logging.Debugf("Verbose: updated in-memory state mods=%d\n", len(state.Mods))
 
-	state.ConfigVersion = configVersion
+	if !result.ConfigSkipped {
+		state.ConfigVersion = configVersion
+	}
 	state.ManifestDate = m.LastUpdated
 	state.Mode = mode
 

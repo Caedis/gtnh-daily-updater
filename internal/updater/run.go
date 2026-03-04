@@ -97,7 +97,7 @@ func Run(ctx context.Context, opts Options) (*UpdateResult, error) {
 	if err := snapshotAndUpdateConfigsIfNeeded(ctx, state, gameDir, result, rollback, effectiveConfigVersion); err != nil {
 		return nil, err
 	}
-	if err := persistUpdatedState(state, changes, m, mode, opts, db, extraDownloads, latestDownloads, rollback, effectiveConfigVersion); err != nil {
+	if err := persistUpdatedState(state, changes, m, mode, opts, db, extraDownloads, latestDownloads, rollback, effectiveConfigVersion, result); err != nil {
 		return nil, err
 	}
 

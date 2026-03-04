@@ -36,6 +36,7 @@ type UpdateResult struct {
 	Updated       int
 	Unchanged     int
 	ConfigUpdated bool
+	ConfigSkipped bool
 	Skipped       []string
 }
 
