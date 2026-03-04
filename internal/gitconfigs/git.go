@@ -21,9 +21,6 @@ func runGit(ctx context.Context, dir string, args ...string) error {
 		logging.Debugf("git %v failed: %v\n%s", args, err, out.String())
 		return fmt.Errorf("git %v: %w\n%s", args, err, out.String())
 	}
-	if out.Len() > 0 {
-		logging.Debugf("git %v output:\n%s", args, out.String())
-	}
 	return nil
 }
 
