@@ -4,7 +4,9 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/caedis/gtnh-daily-updater/internal/logging"
 	"github.com/caedis/gtnh-daily-updater/internal/profile"
@@ -64,6 +66,13 @@ var rootCmd = &cobra.Command{
 			}
 			if p.LogFile != nil && !cmd.Flags().Changed("log-file") {
 				logFile = *p.LogFile
+			}
+		}
+
+		if logFile == "" {
+			if cacheHome, err := os.UserCacheDir(); err == nil {
+				logFile = filepath.Join(cacheHome, "gtnh-daily-updater", "logs",
+					time.Now().Format("2006-01-02_15-04-05")+".log")
 			}
 		}
 

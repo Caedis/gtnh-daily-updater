@@ -14,7 +14,7 @@ var (
 	verbose atomic.Bool
 
 	mu         sync.Mutex
-	output     io.Writer = os.Stdout
+	fileOutput io.Writer
 	outputFile *os.File
 	outputPath string
 )
@@ -45,14 +45,14 @@ func SetOutputFile(path string) error {
 		if err := outputFile.Close(); err != nil {
 			outputFile = nil
 			outputPath = ""
-			output = os.Stdout
+			fileOutput = nil
 			return err
 		}
 		outputFile = nil
 		outputPath = ""
 	}
 
-	output = os.Stdout
+	fileOutput = nil
 	if path == "" {
 		return nil
 	}
@@ -67,7 +67,7 @@ func SetOutputFile(path string) error {
 
 	outputFile = f
 	outputPath = path
-	output = io.MultiWriter(os.Stdout, f)
+	fileOutput = f
 	return nil
 }
 
@@ -82,7 +82,7 @@ func Close() error {
 	err := outputFile.Close()
 	outputFile = nil
 	outputPath = ""
-	output = os.Stdout
+	fileOutput = nil
 	return err
 }
 
@@ -90,22 +90,30 @@ func Close() error {
 func Infof(format string, args ...any) {
 	mu.Lock()
 	defer mu.Unlock()
-	fmt.Fprintf(output, format, args...)
+	fmt.Fprintf(os.Stdout, format, args...)
+	if fileOutput != nil {
+		fmt.Fprintf(fileOutput, format, args...)
+	}
 }
 
 // Infoln prints output regardless of verbosity level.
 func Infoln(args ...any) {
 	mu.Lock()
 	defer mu.Unlock()
-	fmt.Fprintln(output, args...)
+	fmt.Fprintln(os.Stdout, args...)
+	if fileOutput != nil {
+		fmt.Fprintln(fileOutput, args...)
+	}
 }
 
 // Debugf prints formatted output only when verbose mode is enabled.
 func Debugf(format string, args ...any) {
-	if !Verbose() {
-		return
-	}
 	mu.Lock()
 	defer mu.Unlock()
-	fmt.Fprintf(output, format, args...)
+	if fileOutput != nil {
+		fmt.Fprintf(fileOutput, format, args...)
+	}
+	if verbose.Load() {
+		fmt.Fprintf(os.Stdout, format, args...)
+	}
 }
