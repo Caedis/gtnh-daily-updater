@@ -78,6 +78,9 @@ func Load(instanceDir string) (*LocalState, error) {
 // On Prism/MultiMC clients, this is <instanceDir>/.minecraft/.
 // On servers and other layouts, this is just instanceDir.
 func GameDir(instanceDir string) string {
+	if abs, err := filepath.Abs(instanceDir); err == nil {
+		instanceDir = abs
+	}
 	dotMC := filepath.Join(instanceDir, ".minecraft")
 	if info, err := os.Stat(dotMC); err == nil && info.IsDir() {
 		return dotMC

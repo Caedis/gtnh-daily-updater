@@ -345,7 +345,7 @@ func snapshotAndUpdateConfigsIfNeeded(ctx context.Context, state *config.LocalSt
 	repoDir := gitconfigs.ConfigRepoDir(gameDir)
 	if _, err := os.Stat(repoDir); os.IsNotExist(err) {
 		if state.ConfigVersion != configVersion {
-			logging.Infof("  Warning: config update skipped — run 'init --config %s' to set up config tracking\n", configVersion)
+			logging.Infof("  Warning: config update skipped — run 'init' and pass the last known config version that was used to `--config`\n")
 			result.ConfigSkipped = true
 		}
 		return nil

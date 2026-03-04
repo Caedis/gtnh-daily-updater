@@ -144,7 +144,7 @@ func ApplyUpdate(ctx context.Context, gameDir, side, newConfigVersion string) er
 
 	// Merge with pack winning on conflicts
 	logging.Debugf("Verbose: gitconfigs merging %s (pack wins on conflicts)\n", newConfigVersion)
-	if err := runGit(ctx, repoDir, "merge", "--squash", "-X", "theirs", newConfigVersion); err != nil {
+	if err := runGit(ctx, repoDir, "merge", "--squash", "--allow-unrelated-histories", "-X", "theirs", newConfigVersion); err != nil {
 		return fmt.Errorf("merging config update: %w", err)
 	}
 
