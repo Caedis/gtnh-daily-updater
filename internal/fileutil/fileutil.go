@@ -30,10 +30,15 @@ func CopyFile(src, dst string) error {
 	if err != nil {
 		return err
 	}
-	defer out.Close()
 
-	_, err = io.Copy(out, in)
-	return err
+	if _, err = io.Copy(out, in); err != nil {
+		out.Close()
+		return err
+	}
+	if err := out.Close(); err != nil {
+		return err
+	}
+	return os.Chtimes(dst, info.ModTime(), info.ModTime())
 }
 
 // CopyDir recursively copies src directory to dst.
