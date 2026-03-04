@@ -291,27 +291,68 @@ func backupTrackedItems(gameDir, backupDir, side string) error {
 	return nil
 }
 
-// copyTrackedItemsToRepo copies tracked items from gameDir into repoDir,
-// replacing any pack versions. Skips journeymap/data/.
-func copyTrackedItemsToRepo(gameDir, repoDir, side string) error {
-	items := trackedItems(side)
-	for _, item := range items {
-		src := filepath.Join(gameDir, item.Name)
-		dst := filepath.Join(repoDir, item.Name)
-		if _, err := os.Stat(src); os.IsNotExist(err) {
+// clearDirExcluding removes all direct children of dir except those named in preserve.
+// Returns nil if dir does not exist.
+func clearDirExcluding(dir string, preserve ...string) error {
+	keep := make(map[string]bool, len(preserve))
+	for _, p := range preserve {
+		keep[p] = true
+	}
+	entries, err := os.ReadDir(dir)
+	if os.IsNotExist(err) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	for _, entry := range entries {
+		if keep[entry.Name()] {
 			continue
 		}
+		if err := os.RemoveAll(filepath.Join(dir, entry.Name())); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// copyTrackedItemsToRepo syncs tracked items from gameDir into repoDir,
+// including propagating deletions. Skips journeymap/data/.
+func copyTrackedItemsToRepo(gameDir, repoDir, side string) error {
+	for _, item := range trackedItems(side) {
+		src := filepath.Join(gameDir, item.Name)
+		dst := filepath.Join(repoDir, item.Name)
+		srcExists := fileExists(src)
+
 		if item.IsFile {
+			if !srcExists {
+				if err := os.Remove(dst); err != nil && !os.IsNotExist(err) {
+					return fmt.Errorf("removing deleted %s from repo: %w", item.Name, err)
+				}
+				continue
+			}
 			if err := fileutil.CopyFile(src, dst); err != nil {
 				return fmt.Errorf("copying %s to repo: %w", item.Name, err)
 			}
-		} else {
-			excludeSubdirs := []string{}
-			if item.Name == "journeymap" {
-				excludeSubdirs = []string{"data"}
+		} else if item.Name == "journeymap" {
+			// Preserve repo's journeymap/data (pack-provided; never written from instance)
+			if err := clearDirExcluding(dst, "data"); err != nil {
+				return fmt.Errorf("clearing journeymap repo dir: %w", err)
 			}
-			if err := fileutil.CopyDirExcluding(src, dst, excludeSubdirs...); err != nil {
-				return fmt.Errorf("copying %s to repo: %w", item.Name, err)
+			if srcExists {
+				if err := fileutil.CopyDirExcluding(src, dst, "data"); err != nil {
+					return fmt.Errorf("copying %s to repo: %w", item.Name, err)
+				}
+			}
+		} else {
+			// Full sync: remove repo dir and recopy from instance
+			if err := os.RemoveAll(dst); err != nil {
+				return fmt.Errorf("clearing %s from repo: %w", item.Name, err)
+			}
+			if srcExists {
+				if err := fileutil.CopyDirExcluding(src, dst); err != nil {
+					return fmt.Errorf("copying %s to repo: %w", item.Name, err)
+				}
 			}
 		}
 	}
