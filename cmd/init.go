@@ -29,7 +29,7 @@ Use --mode experimental for experimental pack instances.`,
 		if configVersion == "" {
 			return wrapUsageError(fmt.Errorf("--config is required (e.g. 2.9.0-nightly-2026-02-10); see <https://github.com/GTNewHorizons/GT-New-Horizons-Modpack/releases>; will not always be the day the daily was mode"))
 		}
-		return updater.Init(context.Background(), instanceDir, installSide, configVersion, mode, getGithubToken())
+		return updater.Init(context.Background(), instanceDir, installSide, configVersion, mode)
 	},
 }
 

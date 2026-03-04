@@ -40,9 +40,6 @@ func TestSaveAndLoadInitializesMaps(t *testing.T) {
 		t.Fatalf("Load failed: %v", err)
 	}
 
-	if loaded.ConfigHashes == nil {
-		t.Fatalf("ConfigHashes should be initialized")
-	}
 	if loaded.Mods == nil {
 		t.Fatalf("Mods should be initialized")
 	}

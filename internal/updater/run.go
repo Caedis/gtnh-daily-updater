@@ -94,7 +94,7 @@ func Run(ctx context.Context, opts Options) (*UpdateResult, error) {
 	if err := updateLwjgl3ifyIfNeeded(ctx, changes, state.Side, opts, rollback); err != nil {
 		return nil, err
 	}
-	if err := mergeConfigsIfNeeded(ctx, state, m, gameDir, db, opts, result, rollback, effectiveConfigVersion); err != nil {
+	if err := snapshotAndUpdateConfigsIfNeeded(ctx, state, gameDir, result, rollback, effectiveConfigVersion); err != nil {
 		return nil, err
 	}
 	if err := persistUpdatedState(state, changes, m, mode, opts, db, extraDownloads, latestDownloads, rollback, effectiveConfigVersion); err != nil {

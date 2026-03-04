@@ -50,12 +50,8 @@ var updateCmd = &cobra.Command{
 		logging.Infof("  Mods: %d added, %d removed, %d updated, %d unchanged\n",
 			result.Added, result.Removed, result.Updated, result.Unchanged)
 
-		if result.ConfigMerged > 0 || result.ConfigConflict > 0 {
-			logging.Infof("  Pack files: %d files merged", result.ConfigMerged)
-			if result.ConfigConflict > 0 {
-				logging.Infof(", %d conflicts → see .packnew files", result.ConfigConflict)
-			}
-			logging.Infoln()
+		if result.ConfigUpdated {
+			logging.Infoln("  Pack configs: updated to new version")
 		}
 
 		if len(result.Skipped) > 0 {

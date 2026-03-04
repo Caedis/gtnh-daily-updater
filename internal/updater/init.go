@@ -9,7 +9,7 @@ import (
 
 	"github.com/caedis/gtnh-daily-updater/internal/assets"
 	"github.com/caedis/gtnh-daily-updater/internal/config"
-	"github.com/caedis/gtnh-daily-updater/internal/configmerge"
+	"github.com/caedis/gtnh-daily-updater/internal/gitconfigs"
 	"github.com/caedis/gtnh-daily-updater/internal/logging"
 	"github.com/caedis/gtnh-daily-updater/internal/manifest"
 )
@@ -17,7 +17,7 @@ import (
 // Init initializes tracking for an existing GTNH installation.
 // It scans the mods/ directory and matches jar filenames against the assets DB
 // to determine what's actually installed, rather than assuming the latest manifest.
-func Init(ctx context.Context, instanceDir, side, configVersion, mode, githubToken string) error {
+func Init(ctx context.Context, instanceDir, side, configVersion, mode string) error {
 	if side != "client" && side != "server" {
 		return fmt.Errorf("side must be 'client' or 'server'")
 	}
@@ -25,7 +25,7 @@ func Init(ctx context.Context, instanceDir, side, configVersion, mode, githubTok
 	if err != nil {
 		return err
 	}
-	logging.Debugf("Verbose: init start instance=%q side=%s mode=%s config-version=%q github-token=%t\n", instanceDir, side, resolvedMode, configVersion, githubToken != "")
+	logging.Debugf("Verbose: init start instance=%q side=%s mode=%s config-version=%q\n", instanceDir, side, resolvedMode, configVersion)
 
 	logging.Infoln("Fetching assets database...")
 	db, err := assets.Fetch(ctx)
@@ -91,18 +91,11 @@ func Init(ctx context.Context, instanceDir, side, configVersion, mode, githubTok
 		return fmt.Errorf("scanning mods directory: %w", err)
 	}
 
-	// Hash files tracked by this modpack version (config + other managed files).
-	logging.Infoln("Hashing tracked modpack files...")
-	hashes, err := configmerge.ComputeTrackedFileHashes(ctx, gameDir, db, configVersion, githubToken)
-	if err != nil {
-		logging.Infof("  Warning: could not hash full modpack file set for %s: %v\n", configVersion, err)
-		logging.Infoln("  Falling back to config-only hashing for this init run.")
-		hashes, err = configmerge.ComputeConfigHashes(gameDir)
-		if err != nil {
-			return fmt.Errorf("hashing configs: %w", err)
-		}
+	// Initialize git-backed config tracking
+	logging.Infoln("Initializing config git repo...")
+	if err := gitconfigs.Init(ctx, gameDir, side, configVersion); err != nil {
+		return fmt.Errorf("initializing config repo: %w", err)
 	}
-	logging.Debugf("Verbose: computed %d tracked file hashes\n", len(hashes))
 
 	// We don't set ManifestDate so the next update will always detect changes
 	state := &config.LocalState{
@@ -110,7 +103,6 @@ func Init(ctx context.Context, instanceDir, side, configVersion, mode, githubTok
 		Mode:          resolvedMode,
 		ManifestDate:  "", // empty = force update on next run
 		ConfigVersion: configVersion,
-		ConfigHashes:  hashes,
 		Mods:          mods,
 	}
 

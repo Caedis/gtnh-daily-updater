@@ -1,0 +1,369 @@
+package gitconfigs
+
+import (
+	"context"
+	"fmt"
+	"io"
+	"io/fs"
+	"os"
+	"path/filepath"
+	"strings"
+	"time"
+
+	"github.com/caedis/gtnh-daily-updater/internal/logging"
+)
+
+const (
+	RepoDir      = ".gtnh-configs"
+	LocalBranch  = "local"
+	RemoteURL    = "https://github.com/GTNewHorizons/GT-New-Horizons-Modpack"
+	GitUserName  = "GTNH Daily Updater"
+	GitUserEmail = "gtnh-daily-updater@localhost"
+)
+
+// ConfigRepoDir returns the path to the git repo inside gameDir.
+func ConfigRepoDir(gameDir string) string {
+	return filepath.Join(gameDir, RepoDir)
+}
+
+type trackedItem struct {
+	Name       string // "config", "journeymap", "resourcepacks", "serverutilities", "servers.json"
+	IsFile     bool   // true for servers.json
+	ClientOnly bool
+}
+
+var allTrackedItems = []trackedItem{
+	{Name: "config"},
+	{Name: "journeymap"},
+	{Name: "resourcepacks", ClientOnly: true},
+	{Name: "serverutilities"},
+	{Name: "servers.json", IsFile: true, ClientOnly: true},
+}
+
+func trackedItems(side string) []trackedItem {
+	var result []trackedItem
+	for _, item := range allTrackedItems {
+		if item.ClientOnly && side != "client" {
+			continue
+		}
+		result = append(result, item)
+	}
+	return result
+}
+
+// Init sets up the config git repo for the instance:
+// 1. Backs up tracked items from gameDir
+// 2. Clones the GTNH modpack repo at the given configVersion tag
+// 3. Creates a 'local' branch and commits the instance's current configs
+func Init(ctx context.Context, gameDir, side, configVersion string) error {
+	repoDir := ConfigRepoDir(gameDir)
+	logging.Debugf("Verbose: gitconfigs init gameDir=%q side=%s configVersion=%s repoDir=%q\n", gameDir, side, configVersion, repoDir)
+
+	// Backup tracked items
+	backupDir := filepath.Join(filepath.Dir(gameDir), ".gtnh-configs-backup-"+time.Now().Format("2006-01-02"))
+	logging.Debugf("Verbose: gitconfigs backing up tracked items to %q\n", backupDir)
+	if err := backupTrackedItems(gameDir, backupDir, side); err != nil {
+		return fmt.Errorf("backing up configs: %w", err)
+	}
+
+	// Remove any existing repo
+	if err := os.RemoveAll(repoDir); err != nil {
+		return fmt.Errorf("removing existing config repo: %w", err)
+	}
+
+	// Clone at the tag
+	logging.Debugf("Verbose: gitconfigs cloning %s at tag %s\n", RemoteURL, configVersion)
+	if err := runGit(ctx, gameDir, "clone", "--depth", "1", "--branch", configVersion, RemoteURL, repoDir); err != nil {
+		return fmt.Errorf("cloning config repo: %w", err)
+	}
+
+	// Configure git identity
+	if err := runGit(ctx, repoDir, "config", "user.name", GitUserName); err != nil {
+		return fmt.Errorf("setting git user.name: %w", err)
+	}
+	if err := runGit(ctx, repoDir, "config", "user.email", GitUserEmail); err != nil {
+		return fmt.Errorf("setting git user.email: %w", err)
+	}
+
+	// Create local branch from the cloned tag HEAD
+	if err := runGit(ctx, repoDir, "checkout", "-b", LocalBranch); err != nil {
+		return fmt.Errorf("creating local branch: %w", err)
+	}
+	logging.Debugf("Verbose: gitconfigs created branch %q\n", LocalBranch)
+
+	// Copy instance configs into repo (overwriting pack versions)
+	if err := copyTrackedItemsToRepo(gameDir, repoDir, side); err != nil {
+		return fmt.Errorf("copying configs to repo: %w", err)
+	}
+
+	// Commit the local state
+	if err := runGit(ctx, repoDir, "add", "-A"); err != nil {
+		return fmt.Errorf("staging files: %w", err)
+	}
+	msg := fmt.Sprintf("Local state at init (%s)", configVersion)
+	if err := runGit(ctx, repoDir, "commit", "--allow-empty", "-m", msg); err != nil {
+		return fmt.Errorf("committing local state: %w", err)
+	}
+	logging.Debugf("Verbose: gitconfigs init complete\n")
+
+	return nil
+}
+
+// Snapshot captures current player changes in the git repo.
+// Always commits (even if nothing changed) to record a checkpoint.
+func Snapshot(ctx context.Context, gameDir, side string) error {
+	repoDir := ConfigRepoDir(gameDir)
+	logging.Debugf("Verbose: gitconfigs snapshot gameDir=%q side=%s\n", gameDir, side)
+
+	if err := copyTrackedItemsToRepo(gameDir, repoDir, side); err != nil {
+		return fmt.Errorf("copying configs to repo: %w", err)
+	}
+
+	if err := runGit(ctx, repoDir, "add", "-A"); err != nil {
+		return fmt.Errorf("staging files: %w", err)
+	}
+	if err := runGit(ctx, repoDir, "commit", "--allow-empty", "-m", "Snapshot player changes"); err != nil {
+		return fmt.Errorf("committing snapshot: %w", err)
+	}
+	logging.Debugf("Verbose: gitconfigs snapshot committed\n")
+
+	return nil
+}
+
+// ApplyUpdate fetches the new pack version and merges it into the local branch
+// (pack wins on conflicts), then copies updated files back to the instance.
+func ApplyUpdate(ctx context.Context, gameDir, side, newConfigVersion string) error {
+	repoDir := ConfigRepoDir(gameDir)
+	logging.Debugf("Verbose: gitconfigs apply-update gameDir=%q side=%s newVersion=%s\n", gameDir, side, newConfigVersion)
+
+	// Fetch the new tag
+	logging.Debugf("Verbose: gitconfigs fetching tag %s\n", newConfigVersion)
+	if err := runGit(ctx, repoDir, "fetch", "--depth", "1", "origin", "tag", newConfigVersion); err != nil {
+		return fmt.Errorf("fetching tag %s: %w", newConfigVersion, err)
+	}
+
+	// Merge with pack winning on conflicts
+	logging.Debugf("Verbose: gitconfigs merging %s (pack wins on conflicts)\n", newConfigVersion)
+	if err := runGit(ctx, repoDir, "merge", "--squash", "-X", "theirs", newConfigVersion); err != nil {
+		return fmt.Errorf("merging config update: %w", err)
+	}
+
+	msg := fmt.Sprintf("Update configs to %s", newConfigVersion)
+	if err := runGit(ctx, repoDir, "commit", "--allow-empty", "-m", msg); err != nil {
+		return fmt.Errorf("committing config update: %w", err)
+	}
+	logging.Debugf("Verbose: gitconfigs merge committed, replacing instance files\n")
+
+	// Atomically replace instance dirs from repo
+	if err := atomicReplaceFromRepo(gameDir, repoDir, side); err != nil {
+		return fmt.Errorf("applying updated configs: %w", err)
+	}
+	logging.Debugf("Verbose: gitconfigs apply-update complete\n")
+
+	return nil
+}
+
+// atomicReplaceFromRepo copies tracked items from repoDir back to gameDir atomically.
+// For each item: rename existing to .bak, copy from repo, remove .bak on success.
+// On failure: restore from .bak.
+func atomicReplaceFromRepo(gameDir, repoDir, side string) error {
+	items := trackedItems(side)
+	var backed []string
+
+	rollback := func() {
+		for _, name := range backed {
+			dst := filepath.Join(gameDir, name)
+			bak := dst + ".bak"
+			_ = os.RemoveAll(dst)
+			_ = os.Rename(bak, dst)
+		}
+	}
+
+	// Phase 1: rename existing to .bak
+	for _, item := range items {
+		dst := filepath.Join(gameDir, item.Name)
+		bak := dst + ".bak"
+
+		if _, err := os.Stat(dst); err == nil {
+			if err := os.Rename(dst, bak); err != nil {
+				rollback()
+				return fmt.Errorf("renaming %s to backup: %w", item.Name, err)
+			}
+		}
+		backed = append(backed, item.Name)
+	}
+
+	// Phase 2: copy from repo
+	for _, item := range items {
+		src := filepath.Join(repoDir, item.Name)
+		dst := filepath.Join(gameDir, item.Name)
+		bak := dst + ".bak"
+
+		var copyErr error
+		if item.IsFile {
+			copyErr = copyFile(src, dst)
+		} else {
+			if item.Name == "journeymap" {
+				// Preserve journeymap/data from bak
+				copyErr = copyDirExcluding(src, dst, "data")
+				if copyErr == nil && fileExists(bak) {
+					// Restore data subdir from backup
+					bakData := filepath.Join(bak, "data")
+					if fileExists(bakData) {
+						copyErr = copyDir(bakData, filepath.Join(dst, "data"))
+					}
+				}
+			} else {
+				copyErr = copyDir(src, dst)
+			}
+		}
+
+		if copyErr != nil {
+			rollback()
+			return fmt.Errorf("copying %s from repo: %w", item.Name, copyErr)
+		}
+	}
+
+	// Phase 3: remove backups on success
+	for _, item := range items {
+		bak := filepath.Join(gameDir, item.Name) + ".bak"
+		_ = os.RemoveAll(bak)
+	}
+
+	return nil
+}
+
+// backupTrackedItems copies tracked items from gameDir to backupDir.
+func backupTrackedItems(gameDir, backupDir, side string) error {
+	items := trackedItems(side)
+	for _, item := range items {
+		src := filepath.Join(gameDir, item.Name)
+		if _, err := os.Stat(src); os.IsNotExist(err) {
+			continue
+		}
+		dst := filepath.Join(backupDir, item.Name)
+		if item.IsFile {
+			if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+				return err
+			}
+			if err := copyFile(src, dst); err != nil {
+				return fmt.Errorf("backing up %s: %w", item.Name, err)
+			}
+		} else {
+			if err := copyDir(src, dst); err != nil {
+				return fmt.Errorf("backing up %s: %w", item.Name, err)
+			}
+		}
+	}
+	return nil
+}
+
+// copyTrackedItemsToRepo copies tracked items from gameDir into repoDir,
+// replacing any pack versions. Skips journeymap/data/.
+func copyTrackedItemsToRepo(gameDir, repoDir, side string) error {
+	items := trackedItems(side)
+	for _, item := range items {
+		src := filepath.Join(gameDir, item.Name)
+		dst := filepath.Join(repoDir, item.Name)
+		if _, err := os.Stat(src); os.IsNotExist(err) {
+			continue
+		}
+		if item.IsFile {
+			if err := copyFile(src, dst); err != nil {
+				return fmt.Errorf("copying %s to repo: %w", item.Name, err)
+			}
+		} else {
+			excludeSubdirs := []string{}
+			if item.Name == "journeymap" {
+				excludeSubdirs = []string{"data"}
+			}
+			if err := copyDirExcluding(src, dst, excludeSubdirs...); err != nil {
+				return fmt.Errorf("copying %s to repo: %w", item.Name, err)
+			}
+		}
+	}
+	return nil
+}
+
+// copyDir recursively copies src directory to dst.
+func copyDir(src, dst string) error {
+	return copyDirExcluding(src, dst)
+}
+
+// copyDirExcluding recursively copies src to dst, skipping named subdirs at the top level.
+func copyDirExcluding(src, dst string, excludeTopLevel ...string) error {
+	excludeSet := make(map[string]bool, len(excludeTopLevel))
+	for _, e := range excludeTopLevel {
+		excludeSet[e] = true
+	}
+
+	srcInfo, err := os.Stat(src)
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(dst, srcInfo.Mode()); err != nil {
+		return err
+	}
+
+	return filepath.WalkDir(src, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+
+		rel, err := filepath.Rel(src, path)
+		if err != nil {
+			return err
+		}
+
+		// Skip excluded top-level subdirs
+		topLevel := strings.SplitN(rel, string(filepath.Separator), 2)[0]
+		if topLevel != "." && excludeSet[topLevel] {
+			if d.IsDir() {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+
+		target := filepath.Join(dst, rel)
+		if d.IsDir() {
+			info, err := d.Info()
+			if err != nil {
+				return err
+			}
+			return os.MkdirAll(target, info.Mode())
+		}
+		return copyFile(path, target)
+	})
+}
+
+// copyFile copies a single file from src to dst.
+func copyFile(src, dst string) error {
+	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+		return err
+	}
+
+	in, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer in.Close()
+
+	info, err := in.Stat()
+	if err != nil {
+		return err
+	}
+
+	out, err := os.OpenFile(dst, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, info.Mode())
+	if err != nil {
+		return err
+	}
+	defer out.Close()
+
+	_, err = io.Copy(out, in)
+	return err
+}
+
+func fileExists(path string) bool {
+	_, err := os.Stat(path)
+	return err == nil
+}
