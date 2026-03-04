@@ -342,6 +342,10 @@ func updateLwjgl3ifyIfNeeded(ctx context.Context, changes []diff.ModChange, side
 }
 
 func snapshotAndUpdateConfigsIfNeeded(ctx context.Context, state *config.LocalState, gameDir string, result *UpdateResult, rollback func(error) error, configVersion string) error {
+	if !gitconfigs.IsGitAvailable() {
+		logging.Infof("  Warning: git not found — skipping config snapshot/update.\n")
+		return nil
+	}
 	repoDir := gitconfigs.ConfigRepoDir(gameDir)
 	if _, err := os.Stat(repoDir); os.IsNotExist(err) {
 		if state.ConfigVersion != configVersion {

@@ -117,9 +117,13 @@ func Init(ctx context.Context, instanceDir, side, configVersion, mode string) er
 	}
 
 	// Initialize git-backed config tracking
-	logging.Infoln("Initializing config git repo...")
-	if err := gitconfigs.Init(ctx, gameDir, side, configVersion); err != nil {
-		return fmt.Errorf("initializing config repo: %w", err)
+	if !gitconfigs.IsGitAvailable() {
+		logging.Infoln("  Warning: git not found — skipping config tracking. Install git to enable this feature.")
+	} else {
+		logging.Infoln("Initializing config git repo...")
+		if err := gitconfigs.Init(ctx, gameDir, side, configVersion); err != nil {
+			return fmt.Errorf("initializing config repo: %w", err)
+		}
 	}
 
 	// We don't set ManifestDate so the next update will always detect changes

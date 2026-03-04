@@ -9,6 +9,12 @@ import (
 	"github.com/caedis/gtnh-daily-updater/internal/logging"
 )
 
+// IsGitAvailable reports whether git is available on PATH.
+func IsGitAvailable() bool {
+	_, err := exec.LookPath("git")
+	return err == nil
+}
+
 // runGit runs a git command in the given working directory.
 func runGit(ctx context.Context, dir string, args ...string) error {
 	logging.Debugf("git %v (dir=%s)\n", args, dir)
