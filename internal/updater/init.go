@@ -6,9 +6,11 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/caedis/gtnh-daily-updater/internal/assets"
 	"github.com/caedis/gtnh-daily-updater/internal/config"
+	"github.com/caedis/gtnh-daily-updater/internal/fileutil"
 	"github.com/caedis/gtnh-daily-updater/internal/gitconfigs"
 	"github.com/caedis/gtnh-daily-updater/internal/logging"
 	"github.com/caedis/gtnh-daily-updater/internal/manifest"
@@ -36,6 +38,11 @@ func Init(ctx context.Context, instanceDir, side, configVersion, mode string) er
 
 	// Resolve game directory (mods/ and config/ location)
 	gameDir := config.GameDir(instanceDir)
+
+	logging.Infoln("Backing up mods directory...")
+	if err := backupModsDir(gameDir, instanceDir); err != nil {
+		return fmt.Errorf("backing up mods: %w", err)
+	}
 
 	// Build reverse index: filename -> mod matches
 	logging.Infoln("Scanning mods directory...")
@@ -151,4 +158,17 @@ func Init(ctx context.Context, instanceDir, side, configVersion, mode string) er
 	}
 	logging.Infoln("\nRun 'update' to bring the instance up to date.")
 	return nil
+}
+
+func backupModsDir(gameDir, instanceDir string) error {
+	modsDir := filepath.Join(gameDir, "mods")
+	if _, err := os.Stat(modsDir); os.IsNotExist(err) {
+		return nil
+	}
+	backupDir := filepath.Join(instanceDir, ".gtnh-mods-backup-"+time.Now().Format("2006-01-02"))
+	if err := os.RemoveAll(backupDir); err != nil {
+		return fmt.Errorf("clearing old mods backup: %w", err)
+	}
+	logging.Infof("  Backed up mods to %s\n", backupDir)
+	return fileutil.CopyDir(modsDir, backupDir)
 }

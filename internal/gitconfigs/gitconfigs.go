@@ -3,13 +3,11 @@ package gitconfigs
 import (
 	"context"
 	"fmt"
-	"io"
-	"io/fs"
 	"os"
 	"path/filepath"
-	"strings"
 	"time"
 
+	"github.com/caedis/gtnh-daily-updater/internal/fileutil"
 	"github.com/caedis/gtnh-daily-updater/internal/logging"
 )
 
@@ -204,20 +202,20 @@ func atomicReplaceFromRepo(gameDir, repoDir, side string) error {
 
 		var copyErr error
 		if item.IsFile {
-			copyErr = copyFile(src, dst)
+			copyErr = fileutil.CopyFile(src, dst)
 		} else {
 			if item.Name == "journeymap" {
 				// Preserve journeymap/data from bak
-				copyErr = copyDirExcluding(src, dst, "data")
+				copyErr = fileutil.CopyDirExcluding(src, dst, "data")
 				if copyErr == nil && fileExists(bak) {
 					// Restore data subdir from backup
 					bakData := filepath.Join(bak, "data")
 					if fileExists(bakData) {
-						copyErr = copyDir(bakData, filepath.Join(dst, "data"))
+						copyErr = fileutil.CopyDir(bakData, filepath.Join(dst, "data"))
 					}
 				}
 			} else {
-				copyErr = copyDir(src, dst)
+				copyErr = fileutil.CopyDir(src, dst)
 			}
 		}
 
@@ -246,14 +244,11 @@ func backupTrackedItems(gameDir, backupDir, side string) error {
 		}
 		dst := filepath.Join(backupDir, item.Name)
 		if item.IsFile {
-			if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
-				return err
-			}
-			if err := copyFile(src, dst); err != nil {
+			if err := fileutil.CopyFile(src, dst); err != nil {
 				return fmt.Errorf("backing up %s: %w", item.Name, err)
 			}
 		} else {
-			if err := copyDir(src, dst); err != nil {
+			if err := fileutil.CopyDir(src, dst); err != nil {
 				return fmt.Errorf("backing up %s: %w", item.Name, err)
 			}
 		}
@@ -272,7 +267,7 @@ func copyTrackedItemsToRepo(gameDir, repoDir, side string) error {
 			continue
 		}
 		if item.IsFile {
-			if err := copyFile(src, dst); err != nil {
+			if err := fileutil.CopyFile(src, dst); err != nil {
 				return fmt.Errorf("copying %s to repo: %w", item.Name, err)
 			}
 		} else {
@@ -280,90 +275,12 @@ func copyTrackedItemsToRepo(gameDir, repoDir, side string) error {
 			if item.Name == "journeymap" {
 				excludeSubdirs = []string{"data"}
 			}
-			if err := copyDirExcluding(src, dst, excludeSubdirs...); err != nil {
+			if err := fileutil.CopyDirExcluding(src, dst, excludeSubdirs...); err != nil {
 				return fmt.Errorf("copying %s to repo: %w", item.Name, err)
 			}
 		}
 	}
 	return nil
-}
-
-// copyDir recursively copies src directory to dst.
-func copyDir(src, dst string) error {
-	return copyDirExcluding(src, dst)
-}
-
-// copyDirExcluding recursively copies src to dst, skipping named subdirs at the top level.
-func copyDirExcluding(src, dst string, excludeTopLevel ...string) error {
-	excludeSet := make(map[string]bool, len(excludeTopLevel))
-	for _, e := range excludeTopLevel {
-		excludeSet[e] = true
-	}
-
-	srcInfo, err := os.Stat(src)
-	if err != nil {
-		return err
-	}
-	if err := os.MkdirAll(dst, srcInfo.Mode()); err != nil {
-		return err
-	}
-
-	return filepath.WalkDir(src, func(path string, d fs.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-
-		rel, err := filepath.Rel(src, path)
-		if err != nil {
-			return err
-		}
-
-		// Skip excluded top-level subdirs
-		topLevel := strings.SplitN(rel, string(filepath.Separator), 2)[0]
-		if topLevel != "." && excludeSet[topLevel] {
-			if d.IsDir() {
-				return filepath.SkipDir
-			}
-			return nil
-		}
-
-		target := filepath.Join(dst, rel)
-		if d.IsDir() {
-			info, err := d.Info()
-			if err != nil {
-				return err
-			}
-			return os.MkdirAll(target, info.Mode())
-		}
-		return copyFile(path, target)
-	})
-}
-
-// copyFile copies a single file from src to dst.
-func copyFile(src, dst string) error {
-	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
-		return err
-	}
-
-	in, err := os.Open(src)
-	if err != nil {
-		return err
-	}
-	defer in.Close()
-
-	info, err := in.Stat()
-	if err != nil {
-		return err
-	}
-
-	out, err := os.OpenFile(dst, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, info.Mode())
-	if err != nil {
-		return err
-	}
-	defer out.Close()
-
-	_, err = io.Copy(out, in)
-	return err
 }
 
 func fileExists(path string) bool {
