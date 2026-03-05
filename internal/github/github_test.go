@@ -119,8 +119,6 @@ func TestSelectLatestResultUsesAPIURLWithToken(t *testing.T) {
 }
 
 func TestFetchLatestRelease(t *testing.T) {
-	t.Parallel()
-
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/repos/owner/repo/releases" {
 			t.Fatalf("unexpected path: %s", r.URL.Path)
@@ -181,8 +179,6 @@ func TestFetchLatestRelease(t *testing.T) {
 }
 
 func TestFetchLatestReleaseTag(t *testing.T) {
-	t.Parallel()
-
 	t.Run("returns highest semver non-prerelease tag", func(t *testing.T) {
 		releases := []Release{
 			{TagName: "2.7.0", Prerelease: false},

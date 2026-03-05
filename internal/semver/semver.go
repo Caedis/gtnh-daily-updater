@@ -105,7 +105,7 @@ func Compare(a, b string) int {
 	case aPre == "" && bPre != "":
 		return 1 // a is release, b is pre-release → a > b
 	default:
-		return comparePreRelease(aPre, bPre)
+		return compareNatural(aPre, bPre)
 	}
 }
 
@@ -172,41 +172,4 @@ func compareNumericRuns(a, b string) int {
 		return 1
 	}
 	return 0
-}
-
-// comparePreRelease compares pre-release suffixes like "-alpha21" vs "-alpha3"
-// by splitting each into a text prefix and an optional trailing number, so that
-// numeric ordering is used when the text prefixes match.
-func comparePreRelease(a, b string) int {
-	aText, aNum := splitTrailingNumber(a)
-	bText, bNum := splitTrailingNumber(b)
-
-	if cmp := strings.Compare(aText, bText); cmp != 0 {
-		return cmp
-	}
-	switch {
-	case aNum < bNum:
-		return -1
-	case aNum > bNum:
-		return 1
-	default:
-		return 0
-	}
-}
-
-// splitTrailingNumber splits a string into a text prefix and a trailing integer.
-// e.g. "-alpha21" → ("-alpha", 21), "-pre" → ("-pre", 0), "-rc1" → ("-rc", 1)
-func splitTrailingNumber(s string) (string, int) {
-	i := len(s)
-	for i > 0 && s[i-1] >= '0' && s[i-1] <= '9' {
-		i--
-	}
-	if i == len(s) {
-		return s, 0
-	}
-	n, err := strconv.Atoi(s[i:])
-	if err != nil {
-		return s, 0
-	}
-	return s[:i], n
 }
