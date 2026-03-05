@@ -121,7 +121,7 @@ func Init(ctx context.Context, instanceDir, side, configVersion, mode string) er
 		logging.Infoln("  Warning: git not found — skipping config tracking. Install git to enable this feature.")
 	} else {
 		logging.Infoln("Initializing config git repo...")
-		if err := gitconfigs.Init(ctx, gameDir, side, configVersion); err != nil {
+		if err := gitconfigs.Init(ctx, instanceDir, gameDir, side, configVersion); err != nil {
 			return fmt.Errorf("initializing config repo: %w", err)
 		}
 	}

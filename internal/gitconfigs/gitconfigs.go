@@ -54,12 +54,12 @@ func trackedItems(side string) []trackedItem {
 // 1. Backs up tracked items from gameDir
 // 2. Clones the GTNH modpack repo at the given configVersion tag
 // 3. Creates a 'local' branch and commits the instance's current configs
-func Init(ctx context.Context, gameDir, side, configVersion string) error {
+func Init(ctx context.Context, instanceDir, gameDir, side, configVersion string) error {
 	repoDir := ConfigRepoDir(gameDir)
 	logging.Debugf("Verbose: gitconfigs init gameDir=%q side=%s configVersion=%s repoDir=%q\n", gameDir, side, configVersion, repoDir)
 
 	// Backup tracked items
-	backupDir := filepath.Join(filepath.Dir(gameDir), ".gtnh-configs-backup-"+time.Now().Format("2006-01-02"))
+	backupDir := filepath.Join(instanceDir, ".gtnh-configs-backup-"+time.Now().Format("2006-01-02"))
 	logging.Debugf("Verbose: gitconfigs backing up tracked items to %q\n", backupDir)
 	if err := backupTrackedItems(gameDir, backupDir, side); err != nil {
 		return fmt.Errorf("backing up configs: %w", err)
