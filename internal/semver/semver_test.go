@@ -111,6 +111,36 @@ func TestCompare(t *testing.T) {
 			b:    "rv3-beta-835-GTNH",
 			want: -1,
 		},
+		{
+			name: "nightly date ordering across days",
+			a:    "2.9.0-nightly-2026-03-04-2",
+			b:    "2.9.0-nightly-2026-03-05",
+			want: -1,
+		},
+		{
+			name: "nightly build counter within same day",
+			a:    "2.9.0-nightly-2026-03-05",
+			b:    "2.9.0-nightly-2026-03-05-2",
+			want: -1,
+		},
+		{
+			name: "nightly build counter natural ordering",
+			a:    "2.9.0-nightly-2026-03-05-10",
+			b:    "2.9.0-nightly-2026-03-05-2",
+			want: 1,
+		},
+		{
+			name: "equal versions",
+			a:    "1.2.3",
+			b:    "1.2.3",
+			want: 0,
+		},
+		{
+			name: "different pre-release labels",
+			a:    "1.2.3-alpha",
+			b:    "1.2.3-beta",
+			want: -1,
+		},
 	}
 
 	for _, tt := range tests {
