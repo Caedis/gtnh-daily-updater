@@ -49,6 +49,9 @@ go install .
 Note: You MUST pass the current config version your instance has. It will not work correctly otherwise.  
 Config versions can be found at https://github.com/GTNewHorizons/GT-New-Horizons-Modpack/releases.
 
+For MultiMC/Prism clients, the instance-dir should be the folder that contains the `.minecraft` folder, not the `.minecraft` folder itself.
+For servers, the instance-dir is the root of the server folder, the one that contains `mods`, `config`, etc.
+
 ```bash
 gtnh-daily-updater init \
   --instance-dir "/path/to/instance" \
