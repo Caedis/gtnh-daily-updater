@@ -41,11 +41,6 @@ func CopyFile(src, dst string) error {
 	return os.Chtimes(dst, info.ModTime(), info.ModTime())
 }
 
-// CopyDir recursively copies src directory to dst.
-func CopyDir(src, dst string) error {
-	return CopyDirExcluding(src, dst)
-}
-
 // CopyDirExcluding recursively copies src to dst, skipping named top-level subdirectories.
 func CopyDirExcluding(src, dst string, excludeTopLevel ...string) error {
 	excludeSet := make(map[string]bool, len(excludeTopLevel))

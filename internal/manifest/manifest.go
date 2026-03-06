@@ -15,10 +15,6 @@ const (
 
 	ModeDaily        = "daily"
 	ModeExperimental = "experimental"
-
-	// Deprecated aliases kept for internal compatibility.
-	TrackDaily        = ModeDaily
-	TrackExperimental = ModeExperimental
 )
 
 type DailyManifest struct {
@@ -60,11 +56,6 @@ func ParseMode(mode string) (string, error) {
 	}
 }
 
-// ParseTrack is a deprecated wrapper around ParseMode.
-func ParseTrack(track string) (string, error) {
-	return ParseMode(track)
-}
-
 // URLForMode returns the manifest URL for a normalized mode.
 func URLForMode(mode string) (string, error) {
 	normalized, err := ParseMode(mode)
@@ -78,11 +69,6 @@ func URLForMode(mode string) (string, error) {
 	default:
 		return DailyManifestURL, nil
 	}
-}
-
-// URLForTrack is a deprecated wrapper around URLForMode.
-func URLForTrack(track string) (string, error) {
-	return URLForMode(track)
 }
 
 // Fetch downloads and parses the selected manifest from GitHub.
