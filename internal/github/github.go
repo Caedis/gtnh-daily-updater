@@ -126,7 +126,7 @@ func selectLatestResult(releases []Release, token string, allowPre bool) (*Lates
 		if tag == "" {
 			continue
 		}
-		if !allowPre && (rel.Prerelease || semver.IsPreReleaseTag(tag)) {
+		if !allowPre && (rel.Prerelease || semver.IsPreRelease(tag)) {
 			continue
 		}
 		// Compare against current best by semver before checking assets
@@ -178,7 +178,7 @@ func FetchLatestReleaseTag(ctx context.Context, repo, token string, allowPre boo
 		if tag == "" {
 			continue
 		}
-		if !allowPre && (rel.Prerelease || semver.IsPreReleaseTag(tag)) {
+		if !allowPre && (rel.Prerelease || semver.IsPreRelease(tag)) {
 			continue
 		}
 		if best == "" || semver.Compare(tag, best) > 0 {
@@ -190,4 +190,3 @@ func FetchLatestReleaseTag(ctx context.Context, repo, token string, allowPre boo
 	}
 	return best, nil
 }
-
