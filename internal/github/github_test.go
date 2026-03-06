@@ -77,7 +77,7 @@ func TestSelectLatestResult(t *testing.T) {
 		},
 	}
 
-	got, err := selectLatestResult(releases, "")
+	got, err := selectLatestResult(releases, "", false)
 	if err != nil {
 		t.Fatalf("selectLatestResult failed: %v", err)
 	}
@@ -106,7 +106,7 @@ func TestSelectLatestResultUsesAPIURLWithToken(t *testing.T) {
 		},
 	}
 
-	got, err := selectLatestResult(releases, "token")
+	got, err := selectLatestResult(releases, "token", false)
 	if err != nil {
 		t.Fatalf("selectLatestResult failed: %v", err)
 	}
@@ -163,7 +163,7 @@ func TestFetchLatestRelease(t *testing.T) {
 	}
 	t.Cleanup(func() { githubHTTPClient = oldClient })
 
-	got, err := FetchLatestRelease(context.Background(), "owner/repo", "test-token")
+	got, err := FetchLatestRelease(context.Background(), "owner/repo", "test-token", false)
 	if err != nil {
 		t.Fatalf("FetchLatestRelease failed: %v", err)
 	}
@@ -189,7 +189,7 @@ func TestFetchLatestReleaseTag(t *testing.T) {
 		server := newTagServer(t, releases)
 		defer server.Close()
 
-		got, err := FetchLatestReleaseTag(context.Background(), "owner/repo", "")
+		got, err := FetchLatestReleaseTag(context.Background(), "owner/repo", "", false)
 		if err != nil {
 			t.Fatalf("FetchLatestReleaseTag failed: %v", err)
 		}
@@ -207,7 +207,7 @@ func TestFetchLatestReleaseTag(t *testing.T) {
 		server := newTagServer(t, releases)
 		defer server.Close()
 
-		got, err := FetchLatestReleaseTag(context.Background(), "owner/repo", "")
+		got, err := FetchLatestReleaseTag(context.Background(), "owner/repo", "", false)
 		if err != nil {
 			t.Fatalf("FetchLatestReleaseTag failed: %v", err)
 		}
@@ -224,7 +224,7 @@ func TestFetchLatestReleaseTag(t *testing.T) {
 		server := newTagServer(t, releases)
 		defer server.Close()
 
-		_, err := FetchLatestReleaseTag(context.Background(), "owner/repo", "")
+		_, err := FetchLatestReleaseTag(context.Background(), "owner/repo", "", false)
 		if err == nil {
 			t.Fatal("expected error, got nil")
 		}
@@ -247,7 +247,7 @@ func TestFetchLatestReleaseTag(t *testing.T) {
 		}
 		t.Cleanup(func() { githubHTTPClient = oldClient })
 
-		_, err = FetchLatestReleaseTag(context.Background(), "owner/repo", "")
+		_, err = FetchLatestReleaseTag(context.Background(), "owner/repo", "", false)
 		if err == nil {
 			t.Fatal("expected error, got nil")
 		}

@@ -35,6 +35,34 @@ func DownloadURL(modName, version string) (dlURL, filename string) {
 	return dlURL, filename
 }
 
+// LatestAnyVersion fetches Maven metadata for a mod and returns the latest
+// version including pre-releases.
+func LatestAnyVersion(ctx context.Context, modName string) (string, error) {
+	md, err := fetchMetadata(ctx, MetadataURL(modName))
+	if err != nil {
+		return "", err
+	}
+
+	best := ""
+	for _, v := range md.Versioning.Versions.Version {
+		v = strings.TrimSpace(v)
+		if v == "" {
+			continue
+		}
+		if best == "" || semver.Compare(v, best) > 0 {
+			best = v
+		}
+	}
+	release := strings.TrimSpace(md.Versioning.Release)
+	if release != "" && (best == "" || semver.Compare(release, best) > 0) {
+		best = release
+	}
+	if best == "" {
+		return "", fmt.Errorf("no versions found in Maven metadata for %s", modName)
+	}
+	return best, nil
+}
+
 // LatestNonPreVersion fetches Maven metadata for a mod and returns the latest
 // stable (non "-pre") version.
 func LatestNonPreVersion(ctx context.Context, modName string) (string, error) {

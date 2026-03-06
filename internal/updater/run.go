@@ -8,6 +8,7 @@ import (
 	"github.com/caedis/gtnh-daily-updater/internal/diff"
 	"github.com/caedis/gtnh-daily-updater/internal/github"
 	"github.com/caedis/gtnh-daily-updater/internal/logging"
+	"github.com/caedis/gtnh-daily-updater/internal/manifest"
 )
 
 // Run performs the full update flow.
@@ -24,6 +25,7 @@ func Run(ctx context.Context, opts Options) (*UpdateResult, error) {
 	if err != nil {
 		return nil, err
 	}
+	opts.AllowPreRelease = (mode == manifest.ModeExperimental)
 
 	gameDir := config.GameDir(opts.InstanceDir)
 	modsDir := filepath.Join(gameDir, "mods")
@@ -49,11 +51,17 @@ func Run(ctx context.Context, opts Options) (*UpdateResult, error) {
 
 	effectiveConfigVersion := m.Config
 	if opts.Latest {
-		if lv, err := github.FetchLatestReleaseTag(ctx, "GTNewHorizons/GT-New-Horizons-Modpack", opts.GithubToken); err == nil {
+		if lv, err := github.FetchLatestReleaseTag(ctx, "GTNewHorizons/GT-New-Horizons-Modpack", opts.GithubToken, opts.AllowPreRelease); err == nil {
 			effectiveConfigVersion = lv
 		} else {
 			logging.Debugf("Failed to fetch latest config version from GitHub (%v), falling back to assets DB\n", err)
-			if lv := db.LatestNonPreConfigVersion(); lv != "" {
+			var lv string
+			if opts.AllowPreRelease {
+				lv = db.LatestAnyConfigVersion()
+			} else {
+				lv = db.LatestNonPreConfigVersion()
+			}
+			if lv != "" {
 				effectiveConfigVersion = lv
 			}
 		}

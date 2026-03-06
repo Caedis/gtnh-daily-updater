@@ -77,15 +77,16 @@ func PickPrimaryJar(releaseAssets []ReleaseAsset, version string) *ReleaseAsset 
 }
 
 // FetchLatestRelease fetches recent releases from a GitHub repo and returns
-// the highest semver non-prerelease that has a .jar asset.
-func FetchLatestRelease(ctx context.Context, repo, token string) (*LatestResult, error) {
+// the highest semver release that has a .jar asset.
+// When allowPre is false, pre-releases (Prerelease flag or "-pre" tag suffix) are skipped.
+func FetchLatestRelease(ctx context.Context, repo, token string, allowPre bool) (*LatestResult, error) {
 	apiURL := fmt.Sprintf("https://api.github.com/repos/%s/releases?per_page=%d", repo, releasesPerPage)
 	releases, err := fetchReleases(ctx, apiURL, token)
 	if err != nil {
 		return nil, err
 	}
 
-	best, err := selectLatestResult(releases, token)
+	best, err := selectLatestResult(releases, token, allowPre)
 	if err != nil {
 		return nil, fmt.Errorf("repo %s: %w", repo, err)
 	}
@@ -118,11 +119,14 @@ func fetchReleases(ctx context.Context, apiURL, token string) ([]Release, error)
 	return releases, nil
 }
 
-func selectLatestResult(releases []Release, token string) (*LatestResult, error) {
+func selectLatestResult(releases []Release, token string, allowPre bool) (*LatestResult, error) {
 	var best *LatestResult
 	for _, rel := range releases {
 		tag := strings.TrimSpace(rel.TagName)
-		if tag == "" || rel.Prerelease || semver.IsPreRelease(tag) {
+		if tag == "" {
+			continue
+		}
+		if !allowPre && (rel.Prerelease || semver.IsPreRelease(tag)) {
 			continue
 		}
 		// Compare against current best by semver before checking assets
@@ -158,9 +162,10 @@ func selectLatestResult(releases []Release, token string) (*LatestResult, error)
 	return best, nil
 }
 
-// FetchLatestReleaseTag returns the latest non-prerelease tag from a GitHub repo.
+// FetchLatestReleaseTag returns the latest tag from a GitHub repo.
 // Unlike FetchLatestRelease, it does not require a .jar asset.
-func FetchLatestReleaseTag(ctx context.Context, repo, token string) (string, error) {
+// When allowPre is false, pre-releases (Prerelease flag or "-pre" tag suffix) are skipped.
+func FetchLatestReleaseTag(ctx context.Context, repo, token string, allowPre bool) (string, error) {
 	apiURL := fmt.Sprintf("https://api.github.com/repos/%s/releases?per_page=%d", repo, releasesPerPage)
 	releases, err := fetchReleases(ctx, apiURL, token)
 	if err != nil {
@@ -170,7 +175,10 @@ func FetchLatestReleaseTag(ctx context.Context, repo, token string) (string, err
 	var best string
 	for _, rel := range releases {
 		tag := strings.TrimSpace(rel.TagName)
-		if tag == "" || rel.Prerelease || semver.IsPreRelease(tag) {
+		if tag == "" {
+			continue
+		}
+		if !allowPre && (rel.Prerelease || semver.IsPreRelease(tag)) {
 			continue
 		}
 		if best == "" || semver.Compare(tag, best) > 0 {
@@ -178,8 +186,7 @@ func FetchLatestReleaseTag(ctx context.Context, repo, token string) (string, err
 		}
 	}
 	if best == "" {
-		return "", fmt.Errorf("repo %s: no non-prerelease found", repo)
+		return "", fmt.Errorf("repo %s: no release found", repo)
 	}
 	return best, nil
 }
-
