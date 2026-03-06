@@ -267,7 +267,7 @@ func (db *AssetsDB) LatestNonPreVersion(modName string) (string, error) {
 	}
 
 	for _, v := range entry.Versions {
-		if !v.Prerelease && !strings.HasSuffix(strings.ToLower(strings.TrimSpace(v.VersionTag)), "-pre") {
+		if !v.Prerelease && !semver.IsPreRelease(v.VersionTag) {
 			return v.VersionTag, nil
 		}
 	}
@@ -280,7 +280,7 @@ func (db *AssetsDB) LatestNonPreVersion(modName string) (string, error) {
 // Returns empty string if no non-prerelease version is found.
 func (db *AssetsDB) LatestNonPreConfigVersion() string {
 	for _, v := range db.Config.Versions {
-		if !v.Prerelease && !strings.HasSuffix(strings.ToLower(strings.TrimSpace(v.VersionTag)), "-pre") {
+		if !v.Prerelease && !semver.IsPreRelease(v.VersionTag) {
 			return v.VersionTag
 		}
 	}

@@ -5,6 +5,11 @@ import (
 	"strings"
 )
 
+// IsPreRelease reports whether tag is a pre-release (ends with "-pre", case-insensitive).
+func IsPreRelease(tag string) bool {
+	return strings.HasSuffix(strings.ToLower(strings.TrimSpace(tag)), "-pre")
+}
+
 // Parse extracts numeric components from a version string.
 // Handles formats like "1.2.3", "v1.2.3", "1.2.3-beta", "1.2.3.4".
 // For non-semver strings, returns the raw string as a pre-release suffix

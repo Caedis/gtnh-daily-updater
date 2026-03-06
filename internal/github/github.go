@@ -122,7 +122,7 @@ func selectLatestResult(releases []Release, token string) (*LatestResult, error)
 	var best *LatestResult
 	for _, rel := range releases {
 		tag := strings.TrimSpace(rel.TagName)
-		if tag == "" || rel.Prerelease || isPreReleaseTag(tag) {
+		if tag == "" || rel.Prerelease || semver.IsPreRelease(tag) {
 			continue
 		}
 		// Compare against current best by semver before checking assets
@@ -170,7 +170,7 @@ func FetchLatestReleaseTag(ctx context.Context, repo, token string) (string, err
 	var best string
 	for _, rel := range releases {
 		tag := strings.TrimSpace(rel.TagName)
-		if tag == "" || rel.Prerelease || isPreReleaseTag(tag) {
+		if tag == "" || rel.Prerelease || semver.IsPreRelease(tag) {
 			continue
 		}
 		if best == "" || semver.Compare(tag, best) > 0 {
@@ -183,6 +183,3 @@ func FetchLatestReleaseTag(ctx context.Context, repo, token string) (string, err
 	return best, nil
 }
 
-func isPreReleaseTag(tag string) bool {
-	return strings.HasSuffix(strings.ToLower(strings.TrimSpace(tag)), "-pre")
-}

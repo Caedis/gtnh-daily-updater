@@ -106,24 +106,33 @@ func downloadFileWithRetry(ctx context.Context, dl Download, destDir, githubToke
 	return fmt.Errorf("downloading %s: github failed: %w; maven fallback failed: %v", dl.Filename, lastErr, fallbackErr)
 }
 
-func downloadFileWithRetryURL(ctx context.Context, dl Download, destDir, githubToken, cacheDir string) error {
+func retryWithBackoff(ctx context.Context, n int, fn func() error) error {
 	var lastErr error
-	for attempt := 0; attempt < maxRetries; attempt++ {
+	for attempt := 0; attempt < n; attempt++ {
 		if attempt > 0 {
-			logging.Debugf("Verbose: retrying download %s attempt=%d/%d\n", dl.Filename, attempt+1, maxRetries)
 			select {
 			case <-ctx.Done():
 				return ctx.Err()
 			case <-time.After(time.Duration(attempt) * 2 * time.Second):
 			}
 		}
-
-		lastErr = downloadFile(ctx, dl, destDir, githubToken, cacheDir)
+		lastErr = fn()
 		if lastErr == nil {
 			return nil
 		}
 	}
 	return lastErr
+}
+
+func downloadFileWithRetryURL(ctx context.Context, dl Download, destDir, githubToken, cacheDir string) error {
+	attempt := 0
+	return retryWithBackoff(ctx, maxRetries, func() error {
+		if attempt > 0 {
+			logging.Debugf("Verbose: retrying download %s attempt=%d/%d\n", dl.Filename, attempt+1, maxRetries)
+		}
+		attempt++
+		return downloadFile(ctx, dl, destDir, githubToken, cacheDir)
+	})
 }
 
 func downloadFile(ctx context.Context, dl Download, destDir, githubToken, cacheDir string) error {
@@ -258,22 +267,9 @@ func copyFile(src, dst string) error {
 
 // DownloadToFile downloads a single file from the given URL to destPath with retries.
 func DownloadToFile(ctx context.Context, url, destPath, githubToken string, isGitHubAPI bool) error {
-	var lastErr error
-	for attempt := 0; attempt < maxRetries; attempt++ {
-		if attempt > 0 {
-			select {
-			case <-ctx.Done():
-				return ctx.Err()
-			case <-time.After(time.Duration(attempt) * 2 * time.Second):
-			}
-		}
-
-		lastErr = downloadToFileOnce(ctx, url, destPath, githubToken, isGitHubAPI)
-		if lastErr == nil {
-			return nil
-		}
-	}
-	return lastErr
+	return retryWithBackoff(ctx, maxRetries, func() error {
+		return downloadToFileOnce(ctx, url, destPath, githubToken, isGitHubAPI)
+	})
 }
 
 func downloadToFileOnce(ctx context.Context, url, destPath, githubToken string, isGitHubAPI bool) error {

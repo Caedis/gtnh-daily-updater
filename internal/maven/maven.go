@@ -77,7 +77,7 @@ func latestStableVersion(versions []string, release string) string {
 	best := ""
 	for _, v := range versions {
 		v = strings.TrimSpace(v)
-		if v == "" || isPreReleaseTag(v) {
+		if v == "" || semver.IsPreRelease(v) {
 			continue
 		}
 		if best == "" || semver.Compare(v, best) > 0 {
@@ -86,17 +86,13 @@ func latestStableVersion(versions []string, release string) string {
 	}
 
 	release = strings.TrimSpace(release)
-	if release != "" && !isPreReleaseTag(release) {
+	if release != "" && !semver.IsPreRelease(release) {
 		if best == "" || semver.Compare(release, best) > 0 {
 			best = release
 		}
 	}
 
 	return best
-}
-
-func isPreReleaseTag(v string) bool {
-	return strings.HasSuffix(strings.ToLower(strings.TrimSpace(v)), "-pre")
 }
 
 // SanitizeComponent removes or replaces characters invalid in Maven artifact
