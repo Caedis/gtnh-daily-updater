@@ -178,7 +178,7 @@ func FetchLatestReleaseTag(ctx context.Context, repo, token string, allowPre boo
 		if tag == "" {
 			continue
 		}
-		if !allowPre && (rel.Prerelease || IsPreReleaseTag(tag)) {
+		if !allowPre && (rel.Prerelease || isPreReleaseTag(tag)) {
 			continue
 		}
 		if best == "" || semver.Compare(tag, best) > 0 {
