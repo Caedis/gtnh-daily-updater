@@ -117,7 +117,13 @@ func resolveLatestVersions(ctx context.Context, db *assets.AssetsDB, changes []d
 		if _, isExtra := extraDownloads[c.Name]; isExtra {
 			continue
 		}
-		latestVer, err := db.LatestNonPreVersion(c.Name)
+		var latestVer string
+		var err error
+		if opts.AllowPreRelease {
+			latestVer, err = db.LatestAnyVersion(c.Name)
+		} else {
+			latestVer, err = db.LatestNonPreVersion(c.Name)
+		}
 		if err != nil {
 			continue
 		}
@@ -163,7 +169,13 @@ func resolveLatestVersions(ctx context.Context, db *assets.AssetsDB, changes []d
 			mavenSem <- struct{}{}
 			defer func() { <-mavenSem }()
 
-			latestVer, err := maven.LatestNonPreVersion(ctx, modName)
+			var latestVer string
+			var err error
+			if opts.AllowPreRelease {
+				latestVer, err = maven.LatestAnyVersion(ctx, modName)
+			} else {
+				latestVer, err = maven.LatestNonPreVersion(ctx, modName)
+			}
 			if err != nil {
 				return
 			}
@@ -222,7 +234,7 @@ func resolveLatestVersions(ctx context.Context, db *assets.AssetsDB, changes []d
 				sem <- struct{}{}
 				defer func() { <-sem }()
 
-				gh, err := github.FetchLatestRelease(ctx, repo, opts.GithubToken)
+				gh, err := github.FetchLatestRelease(ctx, repo, opts.GithubToken, opts.AllowPreRelease)
 				if err != nil {
 					return
 				}

@@ -258,6 +258,18 @@ func (db *AssetsDB) ResolveDownloadWithAuth(modName, version string) (apiURL, fi
 	return "", "", fmt.Errorf("version %q not found for mod %q", version, modName)
 }
 
+// LatestAnyVersion returns the highest version tag for a mod, including pre-releases.
+func (db *AssetsDB) LatestAnyVersion(modName string) (string, error) {
+	entry := db.LookupMod(modName)
+	if entry == nil {
+		return "", fmt.Errorf("mod %q not found in assets DB", modName)
+	}
+	if len(entry.Versions) == 0 {
+		return "", fmt.Errorf("no versions found for mod %q", modName)
+	}
+	return entry.Versions[0].VersionTag, nil
+}
+
 // LatestNonPreVersion returns the latest non-prerelease version tag for a mod,
 // filtering out both the Prerelease flag and "-pre" suffixed version tags.
 func (db *AssetsDB) LatestNonPreVersion(modName string) (string, error) {
@@ -273,6 +285,15 @@ func (db *AssetsDB) LatestNonPreVersion(modName string) (string, error) {
 	}
 
 	return "", fmt.Errorf("no stable non-pre version found for mod %q", modName)
+}
+
+// LatestAnyConfigVersion returns the highest config version tag, including pre-releases.
+// Returns empty string if no versions exist.
+func (db *AssetsDB) LatestAnyConfigVersion() string {
+	if len(db.Config.Versions) == 0 {
+		return ""
+	}
+	return db.Config.Versions[0].VersionTag
 }
 
 // LatestNonPreConfigVersion returns the latest non-prerelease config version tag,
