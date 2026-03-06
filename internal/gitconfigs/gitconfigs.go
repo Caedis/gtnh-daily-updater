@@ -246,11 +246,11 @@ func atomicReplaceFromRepo(gameDir, repoDir string, items []trackedItem) error {
 					// Restore data subdir from backup
 					bakData := filepath.Join(bak, "data")
 					if fileExists(bakData) {
-						copyErr = fileutil.CopyDir(bakData, filepath.Join(dst, "data"))
+						copyErr = fileutil.CopyDirExcluding(bakData, filepath.Join(dst, "data"))
 					}
 				}
 			} else {
-				copyErr = fileutil.CopyDir(src, dst)
+				copyErr = fileutil.CopyDirExcluding(src, dst)
 			}
 		}
 
@@ -283,7 +283,7 @@ func backupTrackedItems(gameDir, backupDir, side string) error {
 				return fmt.Errorf("backing up %s: %w", item.Name, err)
 			}
 		} else {
-			if err := fileutil.CopyDir(src, dst); err != nil {
+			if err := fileutil.CopyDirExcluding(src, dst); err != nil {
 				return fmt.Errorf("backing up %s: %w", item.Name, err)
 			}
 		}

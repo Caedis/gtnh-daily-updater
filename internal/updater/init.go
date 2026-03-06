@@ -174,5 +174,5 @@ func backupModsDir(gameDir, instanceDir string) error {
 		return fmt.Errorf("clearing old mods backup: %w", err)
 	}
 	logging.Infof("  Backed up mods to %s\n", backupDir)
-	return fileutil.CopyDir(modsDir, backupDir)
+	return fileutil.CopyDirExcluding(modsDir, backupDir)
 }
