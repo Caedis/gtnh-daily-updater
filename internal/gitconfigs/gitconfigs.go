@@ -72,7 +72,7 @@ func Init(ctx context.Context, instanceDir, gameDir, side, configVersion string)
 
 	// Clone at the tag
 	logging.Debugf("Verbose: gitconfigs cloning %s at tag %s\n", RemoteURL, configVersion)
-	if err := runGit(ctx, gameDir, "clone", "--depth", "1", "--branch", configVersion, RemoteURL, repoDir); err != nil {
+	if err := runGit(ctx, gameDir, "clone", "--no-tags", "--single-branch", "--branch", configVersion, RemoteURL, repoDir); err != nil {
 		return fmt.Errorf("cloning config repo: %w", err)
 	}
 
@@ -132,20 +132,30 @@ func Snapshot(ctx context.Context, gameDir, side string) error {
 }
 
 // ApplyUpdate fetches the new pack version and merges it into the local branch
-// (pack wins on conflicts), then copies updated files back to the instance.
+// (pack wins on genuine conflicts), then copies updated files back to the instance.
 func ApplyUpdate(ctx context.Context, gameDir, side, newConfigVersion string) error {
 	repoDir := ConfigRepoDir(gameDir)
 	logging.Debugf("Verbose: gitconfigs apply-update gameDir=%q side=%s newVersion=%s\n", gameDir, side, newConfigVersion)
 
+	// Unshallow if the repo was previously cloned with --depth 1.
+	// A shallow repo has no common ancestor visible, causing every file to be
+	// treated as a conflict by git merge. Full history is required for a correct merge.
+	shallow, _ := runGitOutput(ctx, repoDir, "rev-parse", "--is-shallow-repository")
+	if strings.TrimSpace(shallow) == "true" {
+		logging.Debugf("Verbose: gitconfigs repo is shallow, unshallowing for correct merge\n")
+		if err := runGit(ctx, repoDir, "fetch", "--unshallow"); err != nil {
+			return fmt.Errorf("unshallowing config repo: %w", err)
+		}
+	}
+
 	// Fetch the new tag
-	logging.Debugf("Verbose: gitconfigs fetching tag %s\n", newConfigVersion)
-	if err := runGit(ctx, repoDir, "fetch", "--depth", "1", "origin", "tag", newConfigVersion); err != nil {
+	if err := runGit(ctx, repoDir, "fetch", "--no-tags", "origin", "tag", newConfigVersion); err != nil {
 		return fmt.Errorf("fetching tag %s: %w", newConfigVersion, err)
 	}
 
-	// Merge with pack winning on conflicts
-	logging.Debugf("Verbose: gitconfigs merging %s (pack wins on conflicts)\n", newConfigVersion)
-	if err := runGit(ctx, repoDir, "merge", "--squash", "--allow-unrelated-histories", "-X", "theirs", newConfigVersion); err != nil {
+	// Merge — pack wins on genuine conflicts; user changes on untouched lines are preserved
+	logging.Debugf("Verbose: gitconfigs merging %s (pack wins on genuine conflicts)\n", newConfigVersion)
+	if err := runGit(ctx, repoDir, "merge", "--squash", "-X", "theirs", newConfigVersion); err != nil {
 		return fmt.Errorf("merging config update: %w", err)
 	}
 
