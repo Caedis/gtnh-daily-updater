@@ -9,6 +9,7 @@ import (
 	"path"
 	"strings"
 
+	"github.com/caedis/gtnh-daily-updater/internal/fileutil"
 	"github.com/caedis/gtnh-daily-updater/internal/semver"
 )
 
@@ -126,20 +127,7 @@ func latestStableVersion(versions []string, release string) string {
 // SanitizeComponent removes or replaces characters invalid in Maven artifact
 // paths or filenames.
 func SanitizeComponent(s string) string {
-	var b strings.Builder
-	for _, r := range s {
-		switch {
-		case (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9'):
-			b.WriteRune(r)
-		case r == '-' || r == '.' || r == '_':
-			b.WriteRune(r)
-		case r == ' ':
-			b.WriteRune('-')
-		default:
-			// skip invalid characters
-		}
-	}
-	return b.String()
+	return fileutil.SanitizeFilename(s)
 }
 
 func MavenFilename(modName, version string) string {

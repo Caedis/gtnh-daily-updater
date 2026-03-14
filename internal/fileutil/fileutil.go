@@ -8,6 +8,26 @@ import (
 	"strings"
 )
 
+// SanitizeFilename removes or replaces characters that are invalid in
+// filenames on Windows, macOS, or Linux. Only allows [a-zA-Z0-9._-],
+// converts spaces to hyphens, and drops everything else.
+func SanitizeFilename(s string) string {
+	var b strings.Builder
+	for _, r := range s {
+		switch {
+		case (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9'):
+			b.WriteRune(r)
+		case r == '-' || r == '.' || r == '_':
+			b.WriteRune(r)
+		case r == ' ':
+			b.WriteRune('-')
+		default:
+			// skip invalid characters
+		}
+	}
+	return b.String()
+}
+
 // CopyFile copies a single file from src to dst, preserving permissions.
 // Parent directories of dst are created as needed.
 func CopyFile(src, dst string) error {
