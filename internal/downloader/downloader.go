@@ -7,10 +7,12 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"sort"
 	"sync"
 	"sync/atomic"
 	"time"
 
+	"github.com/caedis/gtnh-daily-updater/internal/fileutil"
 	"github.com/caedis/gtnh-daily-updater/internal/logging"
 )
 
@@ -136,16 +138,26 @@ func downloadFileWithRetryURL(ctx context.Context, dl Download, destDir, githubT
 }
 
 func downloadFile(ctx context.Context, dl Download, destDir, githubToken, cacheDir string) error {
-	destPath := filepath.Join(destDir, dl.Filename)
+	safeFilename := fileutil.SanitizeFilename(dl.Filename)
+	safeModName := fileutil.SanitizeFilename(dl.ModName)
+	destPath := filepath.Join(destDir, safeFilename)
 	logging.Debugf("Verbose: download start mod=%s filename=%s url=%s\n", dl.ModName, dl.Filename, dl.URL)
 
 	// Check cache first
 	if cacheDir != "" {
-		modCacheDir := filepath.Join(cacheDir, dl.ModName)
-		cachePath := filepath.Join(modCacheDir, dl.Filename)
+		modCacheDir := filepath.Join(cacheDir, safeModName)
+		cachePath := filepath.Join(modCacheDir, safeFilename)
 		if _, err := os.Stat(cachePath); err == nil {
 			logging.Debugf("Verbose: cache hit mod=%s file=%s\n", dl.ModName, dl.Filename)
 			return copyFile(cachePath, destPath)
+		}
+		// Fall back to old unsanitized cache path for backwards compatibility
+		oldCachePath := filepath.Join(cacheDir, dl.ModName, dl.Filename)
+		if oldCachePath != cachePath {
+			if _, err := os.Stat(oldCachePath); err == nil {
+				logging.Debugf("Verbose: cache hit (legacy path) mod=%s file=%s\n", dl.ModName, dl.Filename)
+				return copyFile(oldCachePath, destPath)
+			}
 		}
 		logging.Debugf("Verbose: cache miss mod=%s file=%s\n", dl.ModName, dl.Filename)
 	}
@@ -173,11 +185,11 @@ func downloadFile(ctx context.Context, dl Download, destDir, githubToken, cacheD
 
 	// If caching, download to cache first, then copy to dest
 	if cacheDir != "" {
-		modCacheDir := filepath.Join(cacheDir, dl.ModName)
+		modCacheDir := filepath.Join(cacheDir, safeModName)
 		if err := os.MkdirAll(modCacheDir, 0755); err != nil {
 			return fmt.Errorf("creating cache dir for %s: %w", dl.ModName, err)
 		}
-		cachePath := filepath.Join(modCacheDir, dl.Filename)
+		cachePath := filepath.Join(modCacheDir, safeFilename)
 		cacheTmp := cachePath + ".tmp"
 
 		f, err := os.Create(cacheTmp)
@@ -201,6 +213,7 @@ func downloadFile(ctx context.Context, dl Download, destDir, githubToken, cacheD
 			return fmt.Errorf("finalizing cache for %s: %w", dl.Filename, err)
 		}
 
+		evictOldCacheFiles(modCacheDir, 5)
 		return copyFile(cachePath, destPath)
 	}
 
@@ -308,4 +321,48 @@ func downloadToFileOnce(ctx context.Context, url, destPath, githubToken string, 
 	}
 
 	return nil
+}
+
+// evictOldCacheFiles removes the oldest files in dir, keeping only the newest
+// keep entries. Errors are logged but not returned since eviction is best-effort.
+func evictOldCacheFiles(dir string, keep int) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return
+	}
+
+	type fileEntry struct {
+		name    string
+		modTime time.Time
+	}
+
+	var files []fileEntry
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		info, err := e.Info()
+		if err != nil {
+			continue
+		}
+		files = append(files, fileEntry{name: e.Name(), modTime: info.ModTime()})
+	}
+
+	if len(files) <= keep {
+		return
+	}
+
+	// Sort newest first
+	sort.Slice(files, func(i, j int) bool {
+		return files[i].modTime.After(files[j].modTime)
+	})
+
+	for _, f := range files[keep:] {
+		path := filepath.Join(dir, f.name)
+		if err := os.Remove(path); err != nil {
+			logging.Debugf("Verbose: failed to evict cached file %s: %v\n", path, err)
+		} else {
+			logging.Debugf("Verbose: evicted old cached file %s\n", path)
+		}
+	}
 }
