@@ -72,7 +72,7 @@ func Init(ctx context.Context, instanceDir, gameDir, side, configVersion string)
 
 	// Clone at the tag
 	logging.Debugf("Verbose: gitconfigs cloning %s at tag %s\n", RemoteURL, configVersion)
-	if err := runGit(ctx, gameDir, "clone", "--no-tags", "--single-branch", "--branch", configVersion, RemoteURL, repoDir); err != nil {
+	if err := runGit(ctx, gameDir, "clone", "--filter=blob:none", "--no-tags", "--single-branch", "--branch", configVersion, RemoteURL, repoDir); err != nil {
 		return fmt.Errorf("cloning config repo: %w", err)
 	}
 
