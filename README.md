@@ -30,7 +30,13 @@ Always make a full instance backup before first using this program
 
 ## Installation
 
-Build locally:
+[Releases are available for Linux, Windows, and MacOS](https://github.com/Caedis/gtnh-daily-updater/releases)  
+No Go required  
+Just download the version for your OS and run it from the command line.  
+Note: I suggest putting it somewhere in your PATH so it can be ran from anywhere.  
+On Linux, I have `~/.local/bin` added to my PATH  
+
+Building from source code:
 
 ```bash
 go build -o gtnh-daily-updater .
@@ -46,7 +52,7 @@ go install .
 
 1. Initialize state for an existing instance:
 
-Note: You MUST pass the current config version your instance has. It will not work correctly otherwise.  
+Note: **You MUST pass the current config version your instance has. It will not work correctly otherwise.**  
 Config versions can be found at https://github.com/GTNewHorizons/GT-New-Horizons-Modpack/releases.
 
 For MultiMC/Prism clients, the instance-dir should be the folder that contains the `.minecraft` folder, not the `.minecraft` folder itself.  
@@ -184,7 +190,8 @@ gtnh-daily-updater update-all main-client alt-server
 ## Caching and Performance
 
 - Default mod cache directory:
-  `${XDG_CACHE_HOME:-~/.cache}/gtnh-daily-updater/mods`
+  `${XDG_CACHE_HOME:-~/.cache}/gtnh-daily-updater/mods`  
+  Windows: `%LOCALAPPDATA%/gtnh-daily-updater`
 - Disable cache with `--no-cache`
 - Override cache location with `--cache-dir`
 - Control parallel downloads with `--concurrency` (default: `6`)
