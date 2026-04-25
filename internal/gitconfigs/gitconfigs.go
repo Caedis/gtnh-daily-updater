@@ -155,8 +155,14 @@ func ApplyUpdate(ctx context.Context, gameDir, side, newConfigVersion string) er
 
 	// Merge — pack wins on genuine conflicts; user changes on untouched lines are preserved
 	logging.Debugf("Verbose: gitconfigs merging %s (pack wins on genuine conflicts)\n", newConfigVersion)
-	if err := runGit(ctx, repoDir, "merge", "--squash", "-X", "theirs", newConfigVersion); err != nil {
-		return fmt.Errorf("merging config update: %w", err)
+	mergeErr := runGit(ctx, repoDir, "merge", "--squash", "-X", "theirs", newConfigVersion)
+	if mergeErr != nil {
+		// `-X theirs` does not auto-resolve modify/delete conflicts. Apply the
+		// same pack-wins rule to those entries; if anything else is unmerged,
+		// surface the original error.
+		if resolveErr := resolveModifyDeleteConflicts(ctx, repoDir); resolveErr != nil {
+			return fmt.Errorf("merging config update: %w (%v)", mergeErr, resolveErr)
+		}
 	}
 
 	logStagedDiff(ctx, repoDir)
@@ -186,6 +192,60 @@ func ApplyUpdate(ctx context.Context, gameDir, side, newConfigVersion string) er
 	}
 	logging.Debugf("Verbose: gitconfigs apply-update complete\n")
 
+	return nil
+}
+
+// resolveModifyDeleteConflicts handles modify/delete conflicts left over by
+// `merge -X theirs` using the same pack-wins rule:
+//   - UD (modified by us, deleted by them) → remove the path
+//   - DU (deleted by us, modified by them) → take pack version
+//
+// Returns nil only when every unmerged path was a modify/delete and was
+// resolved. Any other unmerged state is reported as an error.
+func resolveModifyDeleteConflicts(ctx context.Context, repoDir string) error {
+	out, err := runGitOutput(ctx, repoDir, "status", "--porcelain=v1", "-z")
+	if err != nil {
+		return fmt.Errorf("reading git status: %w", err)
+	}
+	if out == "" {
+		return nil
+	}
+
+	var unresolved []string
+	resolved := 0
+	for entry := range strings.SplitSeq(strings.TrimRight(out, "\x00"), "\x00") {
+		if len(entry) < 4 {
+			continue
+		}
+		code := entry[:2]
+		path := entry[3:]
+		switch code {
+		case "UD":
+			logging.Debugf("Verbose: gitconfigs resolving UD (pack deleted) %q\n", path)
+			if err := runGit(ctx, repoDir, "rm", "--", path); err != nil {
+				return fmt.Errorf("removing %s: %w", path, err)
+			}
+			resolved++
+		case "DU":
+			logging.Debugf("Verbose: gitconfigs resolving DU (pack kept) %q\n", path)
+			if err := runGit(ctx, repoDir, "checkout", "--theirs", "--", path); err != nil {
+				return fmt.Errorf("checking out %s: %w", path, err)
+			}
+			if err := runGit(ctx, repoDir, "add", "--", path); err != nil {
+				return fmt.Errorf("adding %s: %w", path, err)
+			}
+			resolved++
+		default:
+			if strings.ContainsAny(code, "U") || code == "AA" || code == "DD" {
+				unresolved = append(unresolved, code+" "+path)
+			}
+		}
+	}
+
+	if len(unresolved) > 0 {
+		return fmt.Errorf("unresolved conflicts: %s", strings.Join(unresolved, ", "))
+	}
+	logging.Debugf("Verbose: gitconfigs resolved %d modify/delete conflict(s)\n", resolved)
 	return nil
 }
 
