@@ -160,7 +160,7 @@ func ApplyUpdate(ctx context.Context, gameDir, side, newConfigVersion string) er
 		// `-X theirs` does not auto-resolve modify/delete conflicts. Apply the
 		// same pack-wins rule to those entries; if anything else is unmerged,
 		// surface the original error.
-		if resolveErr := resolveModifyDeleteConflicts(ctx, repoDir); resolveErr != nil {
+		if resolveErr := resolveRemainingConflicts(ctx, repoDir); resolveErr != nil {
 			return fmt.Errorf("merging config update: %w (%v)", mergeErr, resolveErr)
 		}
 	}
@@ -195,14 +195,16 @@ func ApplyUpdate(ctx context.Context, gameDir, side, newConfigVersion string) er
 	return nil
 }
 
-// resolveModifyDeleteConflicts handles modify/delete conflicts left over by
-// `merge -X theirs` using the same pack-wins rule:
+// resolveRemainingConflicts handles conflict types left over by `merge -X theirs`
+// (which only resolves content conflicts, not structural ones) using pack-wins:
 //   - UD (modified by us, deleted by them) → remove the path
 //   - DU (deleted by us, modified by them) → take pack version
+//   - AA (rename/rename: both sides added here) → take pack version
+//   - DD (rename/rename: both sides deleted/renamed original) → remove from index
 //
-// Returns nil only when every unmerged path was a modify/delete and was
-// resolved. Any other unmerged state is reported as an error.
-func resolveModifyDeleteConflicts(ctx context.Context, repoDir string) error {
+// Returns nil only when every unmerged path was resolved. Any other unmerged
+// state is reported as an error.
+func resolveRemainingConflicts(ctx context.Context, repoDir string) error {
 	out, err := runGitOutput(ctx, repoDir, "status", "--porcelain=v1", "-z")
 	if err != nil {
 		return fmt.Errorf("reading git status: %w", err)
@@ -235,8 +237,40 @@ func resolveModifyDeleteConflicts(ctx context.Context, repoDir string) error {
 				return fmt.Errorf("adding %s: %w", path, err)
 			}
 			resolved++
+		case "AA":
+			// Both sides added content at this path (e.g. two different source files
+			// both renamed here). Pack wins: take theirs (stage 3).
+			logging.Debugf("Verbose: gitconfigs resolving AA (pack wins) %q\n", path)
+			if err := runGit(ctx, repoDir, "checkout", "--theirs", "--", path); err != nil {
+				return fmt.Errorf("checking out %s: %w", path, err)
+			}
+			if err := runGit(ctx, repoDir, "add", "--", path); err != nil {
+				return fmt.Errorf("adding %s: %w", path, err)
+			}
+			resolved++
+		case "AU":
+			// rename/rename: we renamed to this path, pack did not. Pack wins: remove it.
+			logging.Debugf("Verbose: gitconfigs resolving AU (our rename, remove) %q\n", path)
+			if err := runGit(ctx, repoDir, "rm", "-f", "--", path); err != nil {
+				return fmt.Errorf("removing %s: %w", path, err)
+			}
+			resolved++
+		case "UA":
+			// rename/rename: pack renamed to this path, we did not. Pack wins: accept it.
+			logging.Debugf("Verbose: gitconfigs resolving UA (pack rename, keep) %q\n", path)
+			if err := runGit(ctx, repoDir, "add", "--", path); err != nil {
+				return fmt.Errorf("adding %s: %w", path, err)
+			}
+			resolved++
+		case "DD":
+			// rename/rename: original path renamed away by both sides. Remove from index.
+			logging.Debugf("Verbose: gitconfigs resolving DD (both renamed original) %q\n", path)
+			if err := runGit(ctx, repoDir, "rm", "--cached", "--ignore-unmatch", "--", path); err != nil {
+				return fmt.Errorf("removing %s from index: %w", path, err)
+			}
+			resolved++
 		default:
-			if strings.ContainsAny(code, "U") || code == "AA" || code == "DD" {
+			if strings.ContainsAny(code, "U") {
 				unresolved = append(unresolved, code+" "+path)
 			}
 		}

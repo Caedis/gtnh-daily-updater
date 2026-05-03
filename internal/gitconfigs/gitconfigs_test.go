@@ -89,7 +89,101 @@ func setupConflictRepo(t *testing.T) string {
 	return dir
 }
 
-func TestResolveModifyDeleteConflicts(t *testing.T) {
+// setupRenameRenameRepo creates a repo where two files are renamed in swapped
+// order on each branch, producing AA conflicts: both sides add content at the
+// same destination paths (from different sources). This mirrors the GTNH quest
+// rename pattern where the pack swaps file names across a questline reorganisation.
+func setupRenameRenameRepo(t *testing.T) string {
+	t.Helper()
+	ctx := context.Background()
+	dir := t.TempDir()
+	gitInit(t, dir)
+
+	// Base: two quest files
+	writeFile(t, filepath.Join(dir, "config", "a.json"), "content-a\n")
+	writeFile(t, filepath.Join(dir, "config", "b.json"), "content-b\n")
+	if err := runGit(ctx, dir, "add", "-A"); err != nil {
+		t.Fatal(err)
+	}
+	if err := runGit(ctx, dir, "commit", "-m", "base"); err != nil {
+		t.Fatal(err)
+	}
+
+	// pack branch: a→x.json, b→y.json (pack's naming)
+	if err := runGit(ctx, dir, "checkout", "-b", "pack"); err != nil {
+		t.Fatal(err)
+	}
+	if err := runGit(ctx, dir, "mv", "config/a.json", "config/x.json"); err != nil {
+		t.Fatal(err)
+	}
+	if err := runGit(ctx, dir, "mv", "config/b.json", "config/y.json"); err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, filepath.Join(dir, "config", "x.json"), "pack-x\n")
+	writeFile(t, filepath.Join(dir, "config", "y.json"), "pack-y\n")
+	if err := runGit(ctx, dir, "add", "-A"); err != nil {
+		t.Fatal(err)
+	}
+	if err := runGit(ctx, dir, "commit", "-m", "pack renames"); err != nil {
+		t.Fatal(err)
+	}
+
+	// local branch: a→y.json, b→x.json (swapped — both sides add to x and y)
+	if err := runGit(ctx, dir, "checkout", "main"); err != nil {
+		t.Fatal(err)
+	}
+	if err := runGit(ctx, dir, "checkout", "-b", "local"); err != nil {
+		t.Fatal(err)
+	}
+	if err := runGit(ctx, dir, "mv", "config/a.json", "config/y.json"); err != nil {
+		t.Fatal(err)
+	}
+	if err := runGit(ctx, dir, "mv", "config/b.json", "config/x.json"); err != nil {
+		t.Fatal(err)
+	}
+	if err := runGit(ctx, dir, "commit", "-m", "local renames"); err != nil {
+		t.Fatal(err)
+	}
+
+	return dir
+}
+
+func TestResolveRenameRenameConflicts(t *testing.T) {
+	if !IsGitAvailable() {
+		t.Skip("git not available")
+	}
+	ctx := context.Background()
+	dir := setupRenameRenameRepo(t)
+
+	// Merge produces AA conflicts that -X theirs cannot resolve.
+	_ = runGit(ctx, dir, "merge", "--squash", "-X", "theirs", "pack")
+
+	if err := resolveRemainingConflicts(ctx, dir); err != nil {
+		t.Fatalf("resolve: %v", err)
+	}
+
+	if err := runGit(ctx, dir, "commit", "-m", "merged"); err != nil {
+		t.Fatalf("commit: %v", err)
+	}
+
+	// Pack wins: x.json and y.json should have pack content.
+	gotX, err := os.ReadFile(filepath.Join(dir, "config", "x.json"))
+	if err != nil {
+		t.Fatalf("x.json should exist: %v", err)
+	}
+	if string(gotX) != "pack-x\n" {
+		t.Fatalf("x.json = %q, want pack-x", gotX)
+	}
+	gotY, err := os.ReadFile(filepath.Join(dir, "config", "y.json"))
+	if err != nil {
+		t.Fatalf("y.json should exist: %v", err)
+	}
+	if string(gotY) != "pack-y\n" {
+		t.Fatalf("y.json = %q, want pack-y", gotY)
+	}
+}
+
+func TestResolveRemainingConflicts(t *testing.T) {
 	if !IsGitAvailable() {
 		t.Skip("git not available")
 	}
@@ -99,7 +193,7 @@ func TestResolveModifyDeleteConflicts(t *testing.T) {
 	// Squash-merge pack into local; expect modify/delete conflicts.
 	_ = runGit(ctx, dir, "merge", "--squash", "-X", "theirs", "pack")
 
-	if err := resolveModifyDeleteConflicts(ctx, dir); err != nil {
+	if err := resolveRemainingConflicts(ctx, dir); err != nil {
 		t.Fatalf("resolve: %v", err)
 	}
 

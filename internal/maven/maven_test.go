@@ -114,10 +114,10 @@ func TestFetchMetadata(t *testing.T) {
 
 func TestDownloadURL(t *testing.T) {
 	url, filename := DownloadURL("My Mod", "1.2.3")
-	if filename != "My-Mod-1.2.3.jar" {
-		t.Fatalf("filename=%q want=My-Mod-1.2.3.jar", filename)
+	if filename != "My Mod-1.2.3.jar" {
+		t.Fatalf("filename=%q want=My Mod-1.2.3.jar", filename)
 	}
-	if !strings.Contains(url, "/My%20Mod/1.2.3/My-Mod-1.2.3.jar") {
+	if !strings.Contains(url, "/My%20Mod/1.2.3/My%20Mod-1.2.3.jar") {
 		t.Fatalf("unexpected url: %s", url)
 	}
 }
