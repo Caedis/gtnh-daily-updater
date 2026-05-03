@@ -17,10 +17,8 @@ func SanitizeFilename(s string) string {
 		switch {
 		case (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9'):
 			b.WriteRune(r)
-		case r == '-' || r == '.' || r == '_':
+		case r == '-' || r == '.' || r == '_' || r == '+' || r == ' ':
 			b.WriteRune(r)
-		case r == ' ':
-			b.WriteRune('-')
 		default:
 			// skip invalid characters
 		}
