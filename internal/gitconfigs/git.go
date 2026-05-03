@@ -5,8 +5,7 @@ import (
 	"context"
 	"fmt"
 	"os/exec"
-
-	"github.com/caedis/gtnh-daily-updater/internal/logging"
+"github.com/caedis/gtnh-daily-updater/internal/logging"
 )
 
 // IsGitAvailable reports whether git is available on PATH.
