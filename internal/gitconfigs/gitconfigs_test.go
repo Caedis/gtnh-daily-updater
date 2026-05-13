@@ -183,6 +183,78 @@ func TestResolveRenameRenameConflicts(t *testing.T) {
 	}
 }
 
+// setupBothModifiedRepo creates a repo where both branches modify the same file
+// at the same lines, producing a UU conflict that -X theirs cannot auto-resolve
+// (simulated here by merging without -X theirs).
+func setupBothModifiedRepo(t *testing.T) string {
+	t.Helper()
+	ctx := context.Background()
+	dir := t.TempDir()
+	gitInit(t, dir)
+
+	writeFile(t, filepath.Join(dir, "config", "shared.cfg"), "base\n")
+	if err := runGit(ctx, dir, "add", "-A"); err != nil {
+		t.Fatal(err)
+	}
+	if err := runGit(ctx, dir, "commit", "-m", "base"); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := runGit(ctx, dir, "checkout", "-b", "pack"); err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, filepath.Join(dir, "config", "shared.cfg"), "pack-version\n")
+	if err := runGit(ctx, dir, "add", "-A"); err != nil {
+		t.Fatal(err)
+	}
+	if err := runGit(ctx, dir, "commit", "-m", "pack change"); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := runGit(ctx, dir, "checkout", "main"); err != nil {
+		t.Fatal(err)
+	}
+	if err := runGit(ctx, dir, "checkout", "-b", "local"); err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, filepath.Join(dir, "config", "shared.cfg"), "local-edit\n")
+	if err := runGit(ctx, dir, "add", "-A"); err != nil {
+		t.Fatal(err)
+	}
+	if err := runGit(ctx, dir, "commit", "-m", "local change"); err != nil {
+		t.Fatal(err)
+	}
+
+	return dir
+}
+
+func TestResolveBothModifiedConflicts(t *testing.T) {
+	if !IsGitAvailable() {
+		t.Skip("git not available")
+	}
+	ctx := context.Background()
+	dir := setupBothModifiedRepo(t)
+
+	// Plain squash merge (no -X theirs) leaves a UU conflict.
+	_ = runGit(ctx, dir, "merge", "--squash", "pack")
+
+	if err := resolveRemainingConflicts(ctx, dir); err != nil {
+		t.Fatalf("resolve: %v", err)
+	}
+
+	if err := runGit(ctx, dir, "commit", "-m", "merged"); err != nil {
+		t.Fatalf("commit: %v", err)
+	}
+
+	got, err := os.ReadFile(filepath.Join(dir, "config", "shared.cfg"))
+	if err != nil {
+		t.Fatalf("read shared.cfg: %v", err)
+	}
+	if string(got) != "pack-version\n" {
+		t.Fatalf("shared.cfg = %q, want pack-version", got)
+	}
+}
+
 func TestResolveRemainingConflicts(t *testing.T) {
 	if !IsGitAvailable() {
 		t.Skip("git not available")

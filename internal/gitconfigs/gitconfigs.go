@@ -197,9 +197,12 @@ func ApplyUpdate(ctx context.Context, gameDir, side, newConfigVersion string) er
 
 // resolveRemainingConflicts handles conflict types left over by `merge -X theirs`
 // (which only resolves content conflicts, not structural ones) using pack-wins:
+//   - UU (both modified, e.g. binary content conflict) → take pack version
 //   - UD (modified by us, deleted by them) → remove the path
 //   - DU (deleted by us, modified by them) → take pack version
 //   - AA (rename/rename: both sides added here) → take pack version
+//   - AU (rename/rename: our rename, pack did not) → remove the path
+//   - UA (rename/rename: pack rename, we did not) → accept pack rename
 //   - DD (rename/rename: both sides deleted/renamed original) → remove from index
 //
 // Returns nil only when every unmerged path was resolved. Any other unmerged
@@ -222,6 +225,17 @@ func resolveRemainingConflicts(ctx context.Context, repoDir string) error {
 		code := entry[:2]
 		path := entry[3:]
 		switch code {
+		case "UU":
+			// Both sides modified, content conflict not auto-resolved by -X theirs
+			// (typically binary files). Pack wins: take theirs.
+			logging.Debugf("Verbose: gitconfigs resolving UU (pack wins) %q\n", path)
+			if err := runGit(ctx, repoDir, "checkout", "--theirs", "--", path); err != nil {
+				return fmt.Errorf("checking out %s: %w", path, err)
+			}
+			if err := runGit(ctx, repoDir, "add", "--", path); err != nil {
+				return fmt.Errorf("adding %s: %w", path, err)
+			}
+			resolved++
 		case "UD":
 			logging.Debugf("Verbose: gitconfigs resolving UD (pack deleted) %q\n", path)
 			if err := runGit(ctx, repoDir, "rm", "--", path); err != nil {
