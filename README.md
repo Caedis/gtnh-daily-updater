@@ -48,6 +48,29 @@ Or install into your Go bin:
 go install .
 ```
 
+**Building on Windows** (to avoid UAC admin prompts):
+
+On Windows, the build process generates a manifest file that prevents unnecessary UAC prompts. To build with the manifest:
+
+```powershell
+# Install rsrc (one-time setup)
+go install github.com/akavel/rsrc@latest
+
+# Generate the Windows manifest resource
+rsrc -manifest gtnh-daily-updater.manifest -arch amd64 -o rsrc_windows_amd64.syso
+
+# Build the executable (go will automatically link the .syso file)
+go build -o gtnh-daily-updater.exe .
+```
+
+Or for 32-bit Windows:
+
+```powershell
+rsrc -manifest gtnh-daily-updater.manifest -arch 386 -o rsrc_windows_386.syso
+set GOARCH=386
+go build -o gtnh-daily-updater.exe .
+```
+
 ## Quick Start
 
 1. Initialize state for an existing instance:
