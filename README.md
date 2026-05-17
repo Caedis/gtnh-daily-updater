@@ -178,9 +178,13 @@ gtnh-daily-updater extra add CustomMod --source https://example.com/CustomMod.ja
 
 ## Profiles
 
-Profiles are stored as TOML files in:
+Profiles are stored as TOML files under the OS-native user config directory:
 
-- `${XDG_CONFIG_HOME:-~/.config}/gtnh-daily-updater/profiles`
+- Linux: `${XDG_CONFIG_HOME:-~/.config}/gtnh-daily-updater/profiles`
+- macOS: `~/Library/Application Support/gtnh-daily-updater/profiles`
+- Windows: `%AppData%\gtnh-daily-updater\profiles`
+
+Profiles previously stored under `~/.config/gtnh-daily-updater` on macOS/Windows are auto-migrated to the new location on first run.
 
 Create and use a profile:
 
@@ -212,13 +216,15 @@ gtnh-daily-updater update-all main-client alt-server
 
 ## Caching and Performance
 
-- Default mod cache directory:
-  `${XDG_CACHE_HOME:-~/.cache}/gtnh-daily-updater/mods`  
-  Windows: `%LOCALAPPDATA%/gtnh-daily-updater`
+- Default mod cache and log directory lives under the OS-native user cache directory:
+  - Linux: `${XDG_CACHE_HOME:-~/.cache}/gtnh-daily-updater/{mods,logs}`
+  - macOS: `~/Library/Caches/gtnh-daily-updater/{mods,logs}`
+  - Windows: `%LocalAppData%\gtnh-daily-updater\{mods,logs}`
+- Caches/logs previously stored under `~/.cache/gtnh-daily-updater` on macOS/Windows are auto-migrated to the new location on first run.
 - Disable cache with `--no-cache`
 - Override cache location with `--cache-dir`
 - Control parallel downloads with `--concurrency` (default: `6`)
-- Logs are written to `${XDG_CACHE_HOME:-~/.cache}/gtnh-daily-updater/logs/<timestamp>.log`; debug output is always written to the log file regardless of the `-v` flag
+- Logs are written to `<cache-dir>/logs/<timestamp>.log`; debug output is always written to the log file regardless of the `-v` flag
 
 ## GitHub Token
 

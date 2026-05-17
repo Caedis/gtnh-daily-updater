@@ -17,6 +17,7 @@ import (
 	"github.com/caedis/gtnh-daily-updater/internal/logging"
 	"github.com/caedis/gtnh-daily-updater/internal/lwjgl3ify"
 	"github.com/caedis/gtnh-daily-updater/internal/manifest"
+	"github.com/caedis/gtnh-daily-updater/internal/paths"
 )
 
 func normalizeRunOptions(opts Options) Options {
@@ -268,14 +269,8 @@ func resolveCacheDirectory(opts Options) string {
 	if !opts.NoCache {
 		cacheDir = opts.CacheDir
 		if cacheDir == "" {
-			base := os.Getenv("XDG_CACHE_HOME")
-			if base == "" {
-				if home, err := os.UserHomeDir(); err == nil {
-					base = filepath.Join(home, ".cache")
-				}
-			}
-			if base != "" {
-				cacheDir = filepath.Join(base, "gtnh-daily-updater", "mods")
+			if d, err := paths.ModsCacheDir(); err == nil {
+				cacheDir = d
 			}
 		}
 		if cacheDir != "" {
