@@ -8,6 +8,8 @@ import (
 	"strings"
 
 	"github.com/BurntSushi/toml"
+
+	"github.com/caedis/gtnh-daily-updater/internal/paths"
 )
 
 // Profile holds saveable CLI options. All fields are pointers so we can
@@ -24,15 +26,13 @@ type Profile struct {
 	LogFile     *string `toml:"log-file,omitempty"`
 }
 
-// Dir returns the profiles directory, using XDG_CONFIG_HOME with a fallback
-// to ~/.config.
+// Dir returns the profiles directory under the OS-native user config dir.
 func Dir() string {
-	base := os.Getenv("XDG_CONFIG_HOME")
-	if base == "" {
-		home, _ := os.UserHomeDir()
-		base = filepath.Join(home, ".config")
+	d, err := paths.ProfilesDir()
+	if err != nil {
+		return ""
 	}
-	return filepath.Join(base, "gtnh-daily-updater", "profiles")
+	return d
 }
 
 // Load reads a named profile from the profiles directory.

@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/caedis/gtnh-daily-updater/internal/logging"
+	"github.com/caedis/gtnh-daily-updater/internal/paths"
 	"github.com/caedis/gtnh-daily-updater/internal/profile"
 	"github.com/spf13/cobra"
 )
@@ -70,9 +71,8 @@ var rootCmd = &cobra.Command{
 		}
 
 		if logFile == "" {
-			if cacheHome, err := os.UserCacheDir(); err == nil {
-				logFile = filepath.Join(cacheHome, "gtnh-daily-updater", "logs",
-					time.Now().Format("2006-01-02_15-04-05")+".log")
+			if logsDir, err := paths.LogsDir(); err == nil {
+				logFile = filepath.Join(logsDir, time.Now().Format("2006-01-02_15-04-05")+".log")
 			}
 		}
 

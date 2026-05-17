@@ -160,7 +160,7 @@ func init() {
 	updateAllCmd.Flags().BoolVar(&forceAll, "force", false, "Force update even if already up to date")
 	updateAllCmd.Flags().BoolVar(&latestAll, "latest", false, "Use latest non-pre versions for all mods instead of manifest-pinned versions")
 	updateAllCmd.Flags().IntVar(&concurrencyAll, "concurrency", 6, "Number of concurrent downloads")
-	updateAllCmd.Flags().StringVar(&cacheDirAll, "cache-dir", "", "Directory for caching downloaded mods (default: ~/.cache/gtnh-daily-updater/mods/)")
+	updateAllCmd.Flags().StringVar(&cacheDirAll, "cache-dir", "", "Directory for caching downloaded mods (default: OS user cache dir + /gtnh-daily-updater/mods/)")
 	updateAllCmd.Flags().BoolVar(&noCacheAll, "no-cache", false, "Disable download caching")
 	rootCmd.AddCommand(updateAllCmd)
 }
