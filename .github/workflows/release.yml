@@ -44,6 +44,12 @@ jobs:
         with:
           go-version-file: go.mod
 
+      - name: Generate Windows manifest
+        if: matrix.goos == 'windows'
+        run: |
+          go install github.com/akavel/rsrc@v0.10.2
+          rsrc -manifest gtnh-daily-updater.manifest -arch "${{ matrix.goarch }}" -o "rsrc_windows_${{ matrix.goarch }}.syso"
+
       - name: Build
         env:
           GOOS: ${{ matrix.goos }}
