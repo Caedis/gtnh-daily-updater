@@ -54,7 +54,7 @@ On Windows, the build process generates a manifest file that prevents unnecessar
 
 ```powershell
 # Install rsrc (one-time setup)
-go install github.com/akavel/rsrc@latest
+go install github.com/akavel/rsrc@v0.10.2
 
 # Generate the Windows manifest resource
 rsrc -manifest gtnh-daily-updater.manifest -arch amd64 -o rsrc_windows_amd64.syso
@@ -63,11 +63,11 @@ rsrc -manifest gtnh-daily-updater.manifest -arch amd64 -o rsrc_windows_amd64.sys
 go build -o gtnh-daily-updater.exe .
 ```
 
-Or for 32-bit Windows:
+For another Windows architecture (for example, 386), keep `GOARCH` and `rsrc -arch` aligned:
 
 ```powershell
-rsrc -manifest gtnh-daily-updater.manifest -arch 386 -o rsrc_windows_386.syso
-set GOARCH=386
+$env:GOARCH = "386"
+rsrc -manifest gtnh-daily-updater.manifest -arch $env:GOARCH -o "rsrc_windows_$($env:GOARCH).syso"
 go build -o gtnh-daily-updater.exe .
 ```
 

@@ -2,8 +2,8 @@
 <assembly xmlns="urn:schemas-microsoft-com:asm.v1" manifestVersion="1.0">
   <assemblyIdentity
     version="1.0.0.0"
-    processorArchitecture="amd64"
-    name="gtnh-daily-updater"
+    processorArchitecture="*"
+    name="Caedis.GtnhDailyUpdater"
     type="win32"
   />
   <description>GTNH Daily Updater - CLI tool for keeping GTNH instances up to date</description>
