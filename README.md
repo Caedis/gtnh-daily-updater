@@ -200,7 +200,7 @@ For Windows:
 ```cmd
 gtnh-daily-updater extra add journeymap ^
     --source github:TeamJM/journeymap-legacy ^
-    --match unlimited.jar$
+    --match "unlimited.jar$"
 ```
 
 A same-name extra overrides the manifest entry — no need to `exclude` the original version first. This is the supported way to swap, for example, the manifest's `journeymap-fairplay` for the unlimited build from the same release.
