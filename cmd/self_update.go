@@ -16,15 +16,13 @@ import (
 	"golang.org/x/term"
 )
 
-const selfUpdateCmdName = "self-update"
-
 var (
 	selfUpdateYes        bool
 	selfUpdatePrerelease bool
 )
 
 var selfUpdateCmd = &cobra.Command{
-	Use:   selfUpdateCmdName,
+	Use:   "self-update",
 	Short: "Download and install the latest release of this tool",
 	Long: `Check GitHub for the latest release, verify its SHA256, and replace
 the running binary. Prompts for confirmation unless --yes is given.`,
