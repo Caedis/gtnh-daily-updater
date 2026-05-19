@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"path/filepath"
+	"regexp"
 	"strings"
 
 	"github.com/caedis/gtnh-daily-updater/internal/semver"
@@ -74,6 +75,39 @@ func PickPrimaryJar(releaseAssets []ReleaseAsset, version string) *ReleaseAsset 
 		return jars[0]
 	}
 	return nil
+}
+
+// PickJarMatching returns the single .jar asset whose name matches pattern.
+// Returns nil on zero or multiple matches; callers should error with the
+// candidate jar names so users can refine the pattern.
+func PickJarMatching(releaseAssets []ReleaseAsset, pattern *regexp.Regexp) *ReleaseAsset {
+	var matched *ReleaseAsset
+	count := 0
+	for i, asset := range releaseAssets {
+		if !strings.EqualFold(filepath.Ext(asset.Name), ".jar") {
+			continue
+		}
+		if pattern.MatchString(asset.Name) {
+			matched = &releaseAssets[i]
+			count++
+		}
+	}
+	if count == 1 {
+		return matched
+	}
+	return nil
+}
+
+// JarAssetNames returns the names of all .jar assets, for use in error
+// messages when PickJarMatching fails.
+func JarAssetNames(releaseAssets []ReleaseAsset) []string {
+	var names []string
+	for _, asset := range releaseAssets {
+		if strings.EqualFold(filepath.Ext(asset.Name), ".jar") {
+			names = append(names, asset.Name)
+		}
+	}
+	return names
 }
 
 // FetchLatestRelease fetches recent releases from a GitHub repo and returns

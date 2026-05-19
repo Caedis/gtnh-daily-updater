@@ -39,6 +39,11 @@ type ComputeOptions struct {
 }
 
 // Compute compares the current local state against a new manifest and returns the list of changes.
+//
+// Names are matched exactly. Callers that need case-insensitive matching
+// against the manifest should canonicalize state.ExcludeMods, state.ExtraMods,
+// and state.Mods to the manifest's casing before calling Compute (see
+// updater.CanonicalizeStateNames).
 func Compute(state *config.LocalState, newManifest *manifest.DailyManifest, opts *ComputeOptions) []ModChange {
 	newMods := newManifest.AllMods()
 	sideMode := state.Side
@@ -59,6 +64,16 @@ func Compute(state *config.LocalState, newManifest *manifest.DailyManifest, opts
 		s := side.Parse(info.Side)
 		if !s.IncludedIn(sideMode) {
 			continue
+		}
+
+		// Same-name extra overrides the manifest entry; the extras loop below
+		// emits Added/Updated/Unchanged. Skip here to avoid duplicate changes.
+		// This takes precedence over excludes — an extra with the same name is
+		// the user's explicit intent for this slot.
+		if opts != nil {
+			if _, isExtra := opts.ExtraMods[name]; isExtra {
+				continue
+			}
 		}
 
 		// Skip excluded mods — if currently installed, mark as Removed
@@ -125,10 +140,6 @@ func Compute(state *config.LocalState, newManifest *manifest.DailyManifest, opts
 	if opts != nil {
 		for _, name := range slices.Sorted(maps.Keys(opts.ExtraMods)) {
 			extra := opts.ExtraMods[name]
-			// Skip if already in manifest (manifest takes precedence unless excluded)
-			if _, inManifest := newMods[name]; inManifest && !excludeSet[name] {
-				continue
-			}
 
 			s := side.Parse(extra.Side)
 			if !s.IncludedIn(sideMode) {

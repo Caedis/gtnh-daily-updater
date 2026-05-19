@@ -24,6 +24,7 @@ type ExtraModSpec struct {
 	Version string `json:"version,omitempty"`
 	Source  string `json:"source,omitempty"`
 	Side    string `json:"side,omitempty"`
+	Match   string `json:"match,omitempty"`
 }
 
 type InstalledMod struct {
