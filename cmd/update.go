@@ -17,8 +17,10 @@ var (
 	noCache     bool
 )
 
+var updateCmdName = "update"
+
 var updateCmd = &cobra.Command{
-	Use:   "update",
+	Use:   updateCmdName,
 	Short: "Update mods and tracked pack files to the latest manifest build",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		opts := updater.Options{

@@ -92,12 +92,11 @@ var rootCmd = &cobra.Command{
 }
 
 // maybeCheckForUpdate runs the startup self-update check. It is intentionally
-// best-effort and silent on failure. Skipped for the self-update command
-// itself (which performs its own check).
+// best-effort and silent on failure. Only run on init, update, and update-all.
 func maybeCheckForUpdate(cmd *cobra.Command) {
 	selfupdate.CleanupOldExe()
 
-	if cmd != nil && cmd.Name() == selfUpdateCmdName {
+	if cmd != nil && cmd.Name() != initCmdName && cmd.Name() != updateCmdName && cmd.Name() != updateAllCmdName {
 		return
 	}
 

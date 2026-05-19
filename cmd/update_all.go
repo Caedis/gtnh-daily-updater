@@ -19,8 +19,10 @@ var (
 	noCacheAll     bool
 )
 
+var updateAllCmdName = "update-all"
+
 var updateAllCmd = &cobra.Command{
-	Use:   "update-all <profile> [profile...]",
+	Use:   updateAllCmdName + " <profile> [profile...]",
 	Short: "Update multiple profiles sequentially, fetching each manifest mode and assets DB once",
 	Args:  usageArgs(cobra.MinimumNArgs(1)),
 	RunE: func(cmd *cobra.Command, args []string) error {
