@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"path"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -402,9 +403,22 @@ func resolveExtraMod(ctx context.Context, name string, spec config.ExtraModSpec,
 
 		version = release.TagName
 
-		asset := github.PickPrimaryJar(release.Assets, version)
-		if asset == nil {
-			return diff.ResolvedExtraMod{}, resolvedExtra{}, fmt.Errorf("no primary .jar asset found in release %s of %s", version, repo)
+		var asset *github.ReleaseAsset
+		if strings.TrimSpace(spec.Match) != "" {
+			re, err := regexp.Compile(spec.Match)
+			if err != nil {
+				return diff.ResolvedExtraMod{}, resolvedExtra{}, fmt.Errorf("invalid match pattern %q for extra %s: %w", spec.Match, name, err)
+			}
+			asset = github.PickJarMatching(release.Assets, re)
+			if asset == nil {
+				candidates := github.JarAssetNames(release.Assets)
+				return diff.ResolvedExtraMod{}, resolvedExtra{}, fmt.Errorf("match pattern %q for extra %s did not uniquely identify a jar in release %s of %s; candidates: %s", spec.Match, name, version, repo, strings.Join(candidates, ", "))
+			}
+		} else {
+			asset = github.PickPrimaryJar(release.Assets, version)
+			if asset == nil {
+				return diff.ResolvedExtraMod{}, resolvedExtra{}, fmt.Errorf("no primary .jar asset found in release %s of %s", version, repo)
+			}
 		}
 		downloadURL := asset.BrowserDownloadURL
 		isGitHubAPI := false

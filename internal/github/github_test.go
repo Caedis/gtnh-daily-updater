@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"regexp"
 	"testing"
 )
 
@@ -48,6 +49,50 @@ func TestPickPrimaryJar(t *testing.T) {
 		}
 		if got := PickPrimaryJar(assets, "1.0.0"); got != nil {
 			t.Fatalf("PickPrimaryJar should be nil for ambiguous jars, got %v", got)
+		}
+	})
+}
+
+func TestPickJarMatching(t *testing.T) {
+	journeymapAssets := []ReleaseAsset{
+		{Name: "journeymap-1.7.10-5.2.15-dev.jar"},
+		{Name: "journeymap-1.7.10-5.2.15-fairplay.jar"},
+		{Name: "journeymap-1.7.10-5.2.15-unlimited-dev-preshadow.jar"},
+		{Name: "journeymap-1.7.10-5.2.15-unlimited-sources.jar"},
+		{Name: "journeymap-1.7.10-5.2.15-unlimited.jar"},
+	}
+
+	t.Run("anchored pattern uniquely matches", func(t *testing.T) {
+		re := regexp.MustCompile(`unlimited\.jar$`)
+		got := PickJarMatching(journeymapAssets, re)
+		if got == nil || got.Name != "journeymap-1.7.10-5.2.15-unlimited.jar" {
+			t.Fatalf("PickJarMatching=%v, want unlimited.jar", got)
+		}
+	})
+
+	t.Run("ambiguous pattern returns nil", func(t *testing.T) {
+		re := regexp.MustCompile(`unlimited`)
+		if got := PickJarMatching(journeymapAssets, re); got != nil {
+			t.Fatalf("PickJarMatching should be nil for ambiguous pattern, got %v", got)
+		}
+	})
+
+	t.Run("no match returns nil", func(t *testing.T) {
+		re := regexp.MustCompile(`nonexistent`)
+		if got := PickJarMatching(journeymapAssets, re); got != nil {
+			t.Fatalf("PickJarMatching should be nil for no match, got %v", got)
+		}
+	})
+
+	t.Run("non-jar assets ignored", func(t *testing.T) {
+		assets := []ReleaseAsset{
+			{Name: "thing.zip"},
+			{Name: "thing.jar"},
+		}
+		re := regexp.MustCompile(`thing`)
+		got := PickJarMatching(assets, re)
+		if got == nil || got.Name != "thing.jar" {
+			t.Fatalf("PickJarMatching=%v, want thing.jar", got)
 		}
 	})
 }

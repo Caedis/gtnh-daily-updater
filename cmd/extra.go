@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"regexp"
 	"strings"
 
 	"github.com/caedis/gtnh-daily-updater/internal/assets"
@@ -18,6 +19,7 @@ var (
 	extraSource  string
 	extraVersion string
 	extraSide    string
+	extraMatch   string
 )
 
 var extraCmd = &cobra.Command{
@@ -34,7 +36,17 @@ var extraAddCmd = &cobra.Command{
   - --source github:Owner/Repo: downloads from GitHub releases
   - --source curseforge:12345: downloads latest release from CurseForge project
   - --source curseforge:12345/67890: downloads a specific CurseForge file
-  - --source https://example.com/mod.jar: downloads from direct URL`,
+  - --source https://example.com/mod.jar: downloads from direct URL
+
+When --source is github:Owner/Repo and the release contains multiple jars,
+use --match <regex> to select the desired asset. The pattern must uniquely
+match one .jar; on failure, the candidate jar names are listed so you can
+refine. Anchor patterns (e.g. 'unlimited\.jar$') to avoid matching
+'-dev', '-sources', or '-preshadow' variants.
+
+Example: extra add journeymap --source github:TeamJM/journeymap-legacy --match 'unlimited\.jar$'
+
+A same-name extra overrides the manifest entry — no need to exclude first.`,
 	Args: usageArgs(cobra.ExactArgs(1)),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		name := args[0]
@@ -47,12 +59,22 @@ var extraAddCmd = &cobra.Command{
 		spec := config.ExtraModSpec{
 			Version: extraVersion,
 			Source:  extraSource,
+			Match:   extraMatch,
 		}
 		normalizedSide, err := normalizeExtraSide(extraSide)
 		if err != nil {
 			return err
 		}
 		spec.Side = normalizedSide
+
+		if strings.TrimSpace(spec.Match) != "" {
+			if !strings.HasPrefix(spec.Source, "github:") {
+				return wrapUsageError(fmt.Errorf("--match is only valid with --source github:Owner/Repo"))
+			}
+			if _, err := regexp.Compile(spec.Match); err != nil {
+				return wrapUsageError(fmt.Errorf("invalid --match regex %q: %w", spec.Match, err))
+			}
+		}
 
 		// Validate source
 		ctx := context.Background()
@@ -184,6 +206,9 @@ var extraListCmd = &cobra.Command{
 				version = "latest"
 			}
 			logging.Infof("  - %s (source: %s, version: %s, side: %s)\n", name, source, version, spec.Side)
+			if spec.Match != "" {
+				logging.Infof("      match: %s\n", spec.Match)
+			}
 		}
 		return nil
 	},
@@ -193,6 +218,7 @@ func init() {
 	extraAddCmd.Flags().StringVar(&extraSource, "source", "", "Mod source: github:Owner/Repo or direct URL (default: assets DB)")
 	extraAddCmd.Flags().StringVar(&extraVersion, "version", "", "Pin to specific version (default: latest)")
 	extraAddCmd.Flags().StringVar(&extraSide, "side", "", "Mod side: CLIENT, SERVER, or BOTH (default: BOTH)")
+	extraAddCmd.Flags().StringVar(&extraMatch, "match", "", "Regex to select a specific .jar from a multi-asset GitHub release (requires --source github:...)")
 	extraCmd.AddCommand(extraAddCmd)
 	extraCmd.AddCommand(extraRemoveCmd)
 	extraCmd.AddCommand(extraListCmd)

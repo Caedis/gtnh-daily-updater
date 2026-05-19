@@ -54,8 +54,8 @@ func TestCompute_WithExcludesAndExtras(t *testing.T) {
 	assertChange(t, got, "extra-kept", Unchanged, "9.0.0", "9.0.0")
 	assertChange(t, got, "extra-new", Added, "", "5.0.0")
 
-	// Manifest takes precedence over same-named extra unless excluded.
-	assertChange(t, got, "manifest-and-extra", Updated, "0.9.0", "1.0.0")
+	// Same-name extra overrides the manifest entry.
+	assertChange(t, got, "manifest-and-extra", Updated, "0.9.0", "2.0.0")
 
 	if _, ok := got["server-only"]; ok {
 		t.Fatalf("server-only mod should not be included in client mode")
@@ -86,6 +86,59 @@ func TestCompute_NilOptionsAndSideFiltering(t *testing.T) {
 		t.Fatalf("expected only one change, got %d", len(changes))
 	}
 	if changes[0].Name != "common" || changes[0].Type != Unchanged {
+		t.Fatalf("unexpected change: %+v", changes[0])
+	}
+}
+
+func TestCompute_SameNameExtraOverridesManifest_Uninstalled(t *testing.T) {
+	state := &config.LocalState{
+		Side: "client",
+		Mods: map[string]config.InstalledMod{},
+	}
+	m := &manifest.DailyManifest{
+		GithubMods: map[string]manifest.ModInfo{
+			"journeymap": {Version: "5.2.15-fairplay", Side: "CLIENT"},
+		},
+	}
+	opts := &ComputeOptions{
+		ExtraMods: map[string]ResolvedExtraMod{
+			"journeymap": {Version: "5.2.15", Side: "CLIENT"},
+		},
+	}
+
+	changes := Compute(state, m, opts)
+	if len(changes) != 1 {
+		t.Fatalf("expected single change, got %d: %+v", len(changes), changes)
+	}
+	if changes[0].Name != "journeymap" || changes[0].Type != Added || changes[0].NewVersion != "5.2.15" {
+		t.Fatalf("unexpected change: %+v", changes[0])
+	}
+}
+
+func TestCompute_ExcludeAndSameNameExtra_NoDuplicateChanges(t *testing.T) {
+	state := &config.LocalState{
+		Side: "client",
+		Mods: map[string]config.InstalledMod{
+			"journeymap": {Version: "old", Side: "CLIENT"},
+		},
+	}
+	m := &manifest.DailyManifest{
+		GithubMods: map[string]manifest.ModInfo{
+			"journeymap": {Version: "5.2.15-fairplay", Side: "CLIENT"},
+		},
+	}
+	opts := &ComputeOptions{
+		ExcludeMods: []string{"journeymap"},
+		ExtraMods: map[string]ResolvedExtraMod{
+			"journeymap": {Version: "5.2.15", Side: "CLIENT"},
+		},
+	}
+
+	changes := Compute(state, m, opts)
+	if len(changes) != 1 {
+		t.Fatalf("expected single change, got %d: %+v", len(changes), changes)
+	}
+	if changes[0].Name != "journeymap" || changes[0].Type != Updated || changes[0].NewVersion != "5.2.15" {
 		t.Fatalf("unexpected change: %+v", changes[0])
 	}
 }

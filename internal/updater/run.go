@@ -27,6 +27,10 @@ func Run(ctx context.Context, opts Options) (*UpdateResult, error) {
 	}
 	opts.AllowPreRelease = (mode == manifest.ModeExperimental)
 
+	// Match user-supplied exclude/extra names to manifest casing so
+	// `exclude add journeymap` matches manifest's "JourneyMap" entry.
+	canonicalizeStateNames(state, m)
+
 	gameDir := config.GameDir(opts.InstanceDir)
 	modsDir := filepath.Join(gameDir, "mods")
 
