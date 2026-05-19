@@ -10,8 +10,10 @@ import (
 
 var configVersion string
 
+var initCmdName = "init"
+
 var initCmd = &cobra.Command{
-	Use:   "init",
+	Use:   initCmdName,
 	Short: "Initialize tracking for an existing GTNH installation",
 	Long: `Scans the mods/ directory and matches jar filenames against the GTNH assets
 database to determine what's currently installed.
