@@ -23,7 +23,8 @@ type Release struct {
 type ReleaseAsset struct {
 	Name               string `json:"name"`
 	BrowserDownloadURL string `json:"browser_download_url"`
-	URL                string `json:"url"` // API URL for authenticated downloads
+	URL                string `json:"url"`    // API URL for authenticated downloads
+	Digest             string `json:"digest"` // e.g. "sha256:abcdef..."
 }
 
 // LatestResult holds the result of a GitHub latest-release lookup.
@@ -37,6 +38,14 @@ type LatestResult struct {
 const releasesPerPage = 25
 
 var githubHTTPClient = http.DefaultClient
+
+// SetHTTPClient swaps the package-level HTTP client used for GitHub API calls
+// and returns the previous client. Intended for tests.
+func SetHTTPClient(c *http.Client) *http.Client {
+	old := githubHTTPClient
+	githubHTTPClient = c
+	return old
+}
 
 // PickPrimaryJar selects the primary mod jar from a list of GitHub release assets.
 // It looks for a .jar file whose name ends with "-{version}.jar", which excludes
@@ -194,6 +203,13 @@ func selectLatestResult(releases []Release, token string, allowPre bool) (*Lates
 		return nil, fmt.Errorf("no non-prerelease with .jar asset found")
 	}
 	return best, nil
+}
+
+// FetchReleasesRaw fetches the recent releases for repo without filtering.
+// Intended for callers that need full asset metadata (e.g. self-update).
+func FetchReleasesRaw(ctx context.Context, repo, token string) ([]Release, error) {
+	apiURL := fmt.Sprintf("https://api.github.com/repos/%s/releases?per_page=%d", repo, releasesPerPage)
+	return fetchReleases(ctx, apiURL, token)
 }
 
 // FetchLatestReleaseTag returns the latest tag from a GitHub repo.

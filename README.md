@@ -19,6 +19,7 @@ Always make a full instance backup before first using this program
 - Supports excluded mods and user-defined extra mods
 - Supports named profiles and multi-profile batch updates (`update-all`)
 - Download caching and configurable concurrency
+- Optional startup self-update check with SHA256-verified `self-update` command
 
 ## Requirements
 
@@ -128,6 +129,7 @@ gtnh-daily-updater update --instance-dir "/path/to/instance"
 - `exclude add|remove|list`: skip selected manifest mods
 - `extra add|remove|list`: manage non-manifest mods
 - `profile create|list|show|delete`: manage reusable option sets
+- `self-update`: download and install the latest release after SHA256 verification
 
 Inspect all options:
 
@@ -266,6 +268,33 @@ Or pass per command:
 ```bash
 gtnh-daily-updater update --curseforge-key your_key_here
 ```
+
+## Self-Update
+
+The tool can check GitHub for newer releases at startup and install them on demand. Both behaviors are off by default.
+
+A global config file is created on first run at:
+
+- Linux: `${XDG_CONFIG_HOME:-~/.config}/gtnh-daily-updater/config.toml`
+- macOS: `~/Library/Application Support/gtnh-daily-updater/config.toml`
+- Windows: `%AppData%\gtnh-daily-updater\config.toml`
+
+```toml
+auto_update_check = false
+include_prereleases = false
+```
+
+When `auto_update_check = false` (default), the tool prints a one-line hint pointing to the config file. When `true`, each invocation queries GitHub (3s timeout, silent on failure) and prints a notice if a newer release is available.
+
+Install the latest release:
+
+```bash
+gtnh-daily-updater self-update            # prompts for confirmation
+gtnh-daily-updater self-update --yes      # skip prompt (non-interactive)
+gtnh-daily-updater self-update --prerelease
+```
+
+The downloaded zip's SHA256 is verified against the digest published by the GitHub release API before the running binary is replaced. On Windows, the previous binary is left as `<exe>.old` and removed on next startup.
 
 ## Development
 

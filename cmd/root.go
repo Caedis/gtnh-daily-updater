@@ -8,9 +8,13 @@ import (
 	"strings"
 	"time"
 
+	"context"
+
+	"github.com/caedis/gtnh-daily-updater/internal/globalconfig"
 	"github.com/caedis/gtnh-daily-updater/internal/logging"
 	"github.com/caedis/gtnh-daily-updater/internal/paths"
 	"github.com/caedis/gtnh-daily-updater/internal/profile"
+	"github.com/caedis/gtnh-daily-updater/internal/selfupdate"
 	"github.com/spf13/cobra"
 )
 
@@ -80,8 +84,38 @@ var rootCmd = &cobra.Command{
 		if err := logging.SetOutputFile(logFile); err != nil {
 			return fmt.Errorf("opening log file %q: %w", logFile, err)
 		}
+
+		maybeCheckForUpdate(cmd)
 		return nil
 	},
+}
+
+// maybeCheckForUpdate runs the startup self-update check. It is intentionally
+// best-effort and silent on failure. Skipped for the self-update command
+// itself (which performs its own check).
+func maybeCheckForUpdate(cmd *cobra.Command) {
+	selfupdate.CleanupOldExe()
+
+	if cmd != nil && cmd.Name() == selfUpdateCmdName {
+		return
+	}
+
+	cfg, _ := globalconfig.Load()
+	if !cfg.AutoUpdateCheck {
+		_ = globalconfig.WriteDefaultIfMissing()
+		if p, err := globalconfig.Path(); err == nil {
+			logging.Infof("Update check disabled. Set auto_update_check = true in %s to enable.\n", p)
+		}
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	info, newer, err := selfupdate.CheckLatest(ctx, version, cfg.IncludePrereleases)
+	if err != nil || !newer || info == nil {
+		return
+	}
+	logging.Infof("Update available: %s → %s. Run `gtnh-daily-updater self-update` to install.\n", version, info.Tag)
 }
 
 func Execute() {
