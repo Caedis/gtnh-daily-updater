@@ -139,9 +139,15 @@ func extractMultimcZip(zipPath, instanceDir string) error {
 		destPath := filepath.Join(instanceDir, name)
 
 		// Security check: prevent path traversal
-		cleanDest := filepath.Clean(instanceDir)
-		cleanPath := filepath.Clean(destPath)
-		if cleanPath != cleanDest && !strings.HasPrefix(cleanPath, cleanDest+string(os.PathSeparator)) {
+		absDest, err := filepath.Abs(instanceDir)
+		if err != nil {
+			return err
+		}
+		absPath, err := filepath.Abs(destPath)
+		if err != nil {
+			return err
+		}
+		if absPath != absDest && !strings.HasPrefix(absPath, absDest+string(os.PathSeparator)) {
 			continue
 		}
 
