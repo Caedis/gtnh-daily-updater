@@ -189,18 +189,12 @@ Add extra mods from direct URL:
 gtnh-daily-updater extra add CustomMod --source https://example.com/CustomMod.jar
 ```
 
-Pick a specific jar from a GitHub release that ships multiple variants. Use `--match <regex>` to select the asset; the pattern must uniquely match one `.jar`, otherwise the candidate names are listed so you can refine. Anchor patterns can be used (e.g. `unlimited\.jar$` for [JourneyMap](https://github.com/TeamJM/journeymap-legacy), `'-\d+\.\d+\.\d+\.jar$'` for [GTNH-Web-Map](https://github.com/GTNewHorizons/GTNH-Web-Map)) to avoid matching `-dev`, `-sources`, or `-preshadow` variants:
+Pick a specific jar from a GitHub release that ships multiple variants. Use `--match <regex>` to select the asset; the pattern must uniquely match one `.jar`, otherwise the candidate names are listed so you can refine. Anchor patterns can be used (e.g. `"unlimited\.jar$"` for [JourneyMap](https://github.com/TeamJM/journeymap-legacy), `"-\d+\.\d+\.\d+\.jar$"` for [GTNH-Web-Map](https://github.com/GTNewHorizons/GTNH-Web-Map)) to avoid matching `-dev`, `-sources`, or `-preshadow` variants:
 
 ```bash
 gtnh-daily-updater extra add journeymap \
     --source github:TeamJM/journeymap-legacy \
-    --match 'unlimited\.jar$'
-```
-For Windows:
-```cmd
-gtnh-daily-updater extra add journeymap ^
-    --source github:TeamJM/journeymap-legacy ^
-    --match "unlimited.jar$"
+    --match "unlimited\.jar$"
 ```
 
 A same-name extra overrides the manifest entry — no need to `exclude` the original version first. This is the supported way to swap, for example, the manifest's `journeymap-fairplay` for the unlimited build from the same release.
