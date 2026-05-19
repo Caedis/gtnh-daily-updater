@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 )
 
@@ -66,7 +67,7 @@ func TestExtractBinary(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Stat: %v", err)
 	}
-	if info.Mode().Perm()&0o100 == 0 {
+	if runtime.GOOS != "windows" && info.Mode().Perm()&0o100 == 0 {
 		t.Fatalf("binary not executable: %v", info.Mode())
 	}
 }
