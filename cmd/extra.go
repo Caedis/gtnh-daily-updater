@@ -11,6 +11,7 @@ import (
 	"github.com/caedis/gtnh-daily-updater/internal/config"
 	"github.com/caedis/gtnh-daily-updater/internal/curseforge"
 	"github.com/caedis/gtnh-daily-updater/internal/logging"
+	"github.com/caedis/gtnh-daily-updater/internal/modrinth"
 	"github.com/caedis/gtnh-daily-updater/internal/side"
 	"github.com/spf13/cobra"
 )
@@ -36,6 +37,8 @@ var extraAddCmd = &cobra.Command{
   - --source github:Owner/Repo: downloads from GitHub releases
   - --source curseforge:12345: downloads latest release from CurseForge project
   - --source curseforge:12345/67890: downloads a specific CurseForge file
+  - --source modrinth:slug-or-id: downloads latest release from Modrinth
+  - --source modrinth:slug-or-id/versionID: downloads a specific Modrinth version
   - --source https://example.com/mod.jar: downloads from direct URL
 
 When --source is github:Owner/Repo and the release contains multiple jars,
@@ -126,11 +129,28 @@ A same-name extra overrides the manifest entry — no need to exclude first.`,
 			} else {
 				logging.Infof("  CurseForge source: project %d (latest release)\n", projectID)
 			}
+		} else if rest, ok := strings.CutPrefix(spec.Source, "modrinth:"); ok {
+			project, versionID, err := modrinth.ParseSource(rest)
+			if err != nil {
+				return wrapUsageError(fmt.Errorf("invalid --source %q: %w", spec.Source, err))
+			}
+			exists, err := modrinth.ProjectExists(ctx, project)
+			if err != nil {
+				return fmt.Errorf("checking Modrinth project: %w", err)
+			}
+			if !exists {
+				return fmt.Errorf("Modrinth project %q not found", project)
+			}
+			if versionID != "" {
+				logging.Infof("  Modrinth source: project %s, version %s (pinned)\n", project, versionID)
+			} else {
+				logging.Infof("  Modrinth source: project %s (latest release)\n", project)
+			}
 		} else if strings.HasPrefix(spec.Source, "http://") || strings.HasPrefix(spec.Source, "https://") {
 			// Direct URL — just note it
 			logging.Infof("  Direct URL source: %s\n", spec.Source)
 		} else {
-			return wrapUsageError(fmt.Errorf("invalid source %q: must be empty (assets DB), github:Owner/Repo, curseforge:12345, or a URL", spec.Source))
+			return wrapUsageError(fmt.Errorf("invalid source %q: must be empty (assets DB), github:Owner/Repo, curseforge:12345, modrinth:slug, or a URL", spec.Source))
 		}
 
 		if state.ExtraMods == nil {

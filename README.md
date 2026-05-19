@@ -159,9 +159,7 @@ Add extra mods from GitHub releases:
 gtnh-daily-updater extra add SomeMod --source github:Owner/Repo
 ```
 
-Note: Adding CurseForge extra mods requires a CurseForge API key  
-
-Add extra mods from CurseForge (latest release file):
+Add extra mods from CurseForge (latest release file, requires CurseForge API key):
 
 ```bash
 gtnh-daily-updater extra add SomeMod --source curseforge:12345
@@ -171,6 +169,18 @@ Add extra mods from CurseForge (pinned file):
 
 ```bash
 gtnh-daily-updater extra add SomeMod --source curseforge:12345/67890
+```
+
+Add extra mods from Modrinth (latest release, no API key needed, rate limit 300/min/ip):
+
+```bash
+gtnh-daily-updater extra add SomeMod --source modrinth:slug-or-id
+```
+
+Add extra mods from Modrinth (pinned version):
+
+```bash
+gtnh-daily-updater extra add SomeMod --source modrinth:slug-or-id/versionID
 ```
 
 Add extra mods from direct URL:
