@@ -20,6 +20,7 @@ import (
 	"github.com/caedis/gtnh-daily-updater/internal/github"
 	"github.com/caedis/gtnh-daily-updater/internal/logging"
 	"github.com/caedis/gtnh-daily-updater/internal/maven"
+	"github.com/caedis/gtnh-daily-updater/internal/modrinth"
 	"github.com/caedis/gtnh-daily-updater/internal/semver"
 )
 
@@ -358,6 +359,34 @@ func resolveExtraMod(ctx context.Context, name string, spec config.ExtraModSpec,
 		return diff.ResolvedExtraMod{Version: version, Side: modSide}, resolvedExtra{
 			URL:      downloadURL,
 			Filename: file.FileName,
+		}, nil
+
+	case strings.HasPrefix(spec.Source, "modrinth:"):
+		rest := strings.TrimPrefix(spec.Source, "modrinth:")
+		project, versionID, err := modrinth.ParseSource(rest)
+		if err != nil {
+			return diff.ResolvedExtraMod{}, resolvedExtra{}, err
+		}
+
+		var ver modrinth.Version
+		if versionID != "" {
+			ver, err = modrinth.FetchVersion(ctx, versionID)
+		} else {
+			ver, err = modrinth.FetchLatestVersion(ctx, project, modrinth.GTNHGameVersion, modrinth.GTNHLoader)
+		}
+		if err != nil {
+			return diff.ResolvedExtraMod{}, resolvedExtra{}, err
+		}
+
+		file, err := modrinth.PrimaryFile(ver)
+		if err != nil {
+			return diff.ResolvedExtraMod{}, resolvedExtra{}, err
+		}
+
+		logging.Debugf("Verbose: extra mod %s Modrinth project=%s version=%s filename=%s\n", name, project, ver.ID, file.Filename)
+		return diff.ResolvedExtraMod{Version: ver.ID, Side: modSide}, resolvedExtra{
+			URL:      file.URL,
+			Filename: file.Filename,
 		}, nil
 
 	case strings.HasPrefix(spec.Source, "github:"):

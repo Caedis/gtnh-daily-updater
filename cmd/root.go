@@ -12,6 +12,7 @@ import (
 
 	"github.com/caedis/gtnh-daily-updater/internal/globalconfig"
 	"github.com/caedis/gtnh-daily-updater/internal/logging"
+	"github.com/caedis/gtnh-daily-updater/internal/modrinth"
 	"github.com/caedis/gtnh-daily-updater/internal/paths"
 	"github.com/caedis/gtnh-daily-updater/internal/profile"
 	"github.com/caedis/gtnh-daily-updater/internal/selfupdate"
@@ -141,6 +142,8 @@ func Execute() {
 }
 
 func init() {
+	modrinth.SetVersion(version)
+
 	rootCmd.SetFlagErrorFunc(func(cmd *cobra.Command, err error) error {
 		return wrapUsageError(err)
 	})
