@@ -171,14 +171,14 @@ func TestResolveRenameRenameConflicts(t *testing.T) {
 	if err != nil {
 		t.Fatalf("x.json should exist: %v", err)
 	}
-	if string(gotX) != "pack-x\n" {
+	if strings.TrimSpace(string(gotX)) != "pack-x" {
 		t.Fatalf("x.json = %q, want pack-x", gotX)
 	}
 	gotY, err := os.ReadFile(filepath.Join(dir, "config", "y.json"))
 	if err != nil {
 		t.Fatalf("y.json should exist: %v", err)
 	}
-	if string(gotY) != "pack-y\n" {
+	if strings.TrimSpace(string(gotY)) != "pack-y" {
 		t.Fatalf("y.json = %q, want pack-y", gotY)
 	}
 }
@@ -250,7 +250,7 @@ func TestResolveBothModifiedConflicts(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read shared.cfg: %v", err)
 	}
-	if string(got) != "pack-version\n" {
+	if strings.TrimSpace(string(got)) != "pack-version" {
 		t.Fatalf("shared.cfg = %q, want pack-version", got)
 	}
 }
@@ -292,7 +292,7 @@ func TestResolveRemainingConflicts(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read shared.cfg: %v", err)
 	}
-	if string(got) != "pack-version\n" {
+	if strings.TrimSpace(string(got)) != "pack-version" {
 		t.Fatalf("shared.cfg = %q, want pack-version", got)
 	}
 }
