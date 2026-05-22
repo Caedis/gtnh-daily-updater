@@ -2,6 +2,7 @@ package updater
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"maps"
 	"os"
@@ -305,10 +306,17 @@ func downloadMods(ctx context.Context, downloads []downloader.Download, needsDow
 	logging.Infoln()
 
 	var failed []string
+	var hashFailed []string
 	for _, r := range results {
 		if r.Err != nil {
 			failed = append(failed, fmt.Sprintf("%s: %v", r.Download.Filename, r.Err))
+			if errors.Is(r.Err, downloader.ErrHashMismatch) {
+				hashFailed = append(hashFailed, r.Download.Filename)
+			}
 		}
+	}
+	if len(hashFailed) > 0 {
+		return rollback(fmt.Errorf("hash validation failed after 3 retries for: %s (all download errors: %s)", strings.Join(hashFailed, ", "), strings.Join(failed, "; ")))
 	}
 	if len(failed) > 0 {
 		return rollback(fmt.Errorf("download failures: %s", strings.Join(failed, "; ")))
