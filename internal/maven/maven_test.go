@@ -2,6 +2,7 @@ package maven
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -119,5 +120,45 @@ func TestDownloadURL(t *testing.T) {
 	}
 	if !strings.Contains(url, "/My%20Mod/1.2.3/My-Mod-1.2.3.jar") {
 		t.Fatalf("unexpected url: %s", url)
+	}
+}
+
+func TestFetchSHA256(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/ok.jar.sha256":
+			fmt.Fprint(w, "ABCDEF0123  ok.jar\n")
+		case "/bare.jar.sha256":
+			fmt.Fprint(w, "deadbeef\n")
+		case "/missing.jar.sha256":
+			http.NotFound(w, r)
+		default:
+			http.Error(w, "unexpected", 500)
+		}
+	}))
+	defer srv.Close()
+	oldClient := HTTPClient
+	HTTPClient = srv.Client()
+	defer func() { HTTPClient = oldClient }()
+
+	got, err := FetchSHA256(context.Background(), srv.URL+"/ok.jar")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != "abcdef0123" {
+		t.Fatalf("ok = %q, want abcdef0123", got)
+	}
+
+	got, err = FetchSHA256(context.Background(), srv.URL+"/bare.jar")
+	if err != nil || got != "deadbeef" {
+		t.Fatalf("bare = %q err=%v", got, err)
+	}
+
+	got, err = FetchSHA256(context.Background(), srv.URL+"/missing.jar")
+	if err != nil {
+		t.Fatalf("missing should not error, got %v", err)
+	}
+	if got != "" {
+		t.Fatalf("missing = %q, want \"\"", got)
 	}
 }
