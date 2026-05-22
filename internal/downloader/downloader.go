@@ -2,8 +2,13 @@ package downloader
 
 import (
 	"context"
+	"crypto/sha1"
+	"crypto/sha256"
+	"crypto/sha512"
+	"encoding/hex"
 	"errors"
 	"fmt"
+	"hash"
 	"io"
 	"net/http"
 	"os"
@@ -334,6 +339,26 @@ func downloadToFileOnce(ctx context.Context, url, destPath, githubToken string, 
 
 	return nil
 }
+
+type hasher struct {
+	h hash.Hash
+}
+
+func newHasher(algo string) (*hasher, error) {
+	switch algo {
+	case "sha256":
+		return &hasher{h: sha256.New()}, nil
+	case "sha1":
+		return &hasher{h: sha1.New()}, nil
+	case "sha512":
+		return &hasher{h: sha512.New()}, nil
+	default:
+		return nil, fmt.Errorf("unsupported hash algo %q", algo)
+	}
+}
+
+func (h *hasher) Write(p []byte) (int, error) { return h.h.Write(p) }
+func (h *hasher) Hex() string                 { return hex.EncodeToString(h.h.Sum(nil)) }
 
 // evictOldCacheFiles removes the oldest files in dir, keeping only the newest
 // keep entries. Errors are logged but not returned since eviction is best-effort.
