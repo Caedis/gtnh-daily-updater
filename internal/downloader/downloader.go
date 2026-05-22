@@ -2,6 +2,7 @@ package downloader
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -16,6 +17,10 @@ import (
 	"github.com/caedis/gtnh-daily-updater/internal/logging"
 )
 
+// ErrHashMismatch indicates a downloaded or cached file's hash did not match
+// the expected hash after all retries.
+var ErrHashMismatch = errors.New("hash mismatch")
+
 type Download struct {
 	URL      string
 	Filename string
@@ -25,6 +30,13 @@ type Download struct {
 	IsGitHubAPI bool
 	// MavenFallbackURL is used when a GitHub download fails after retries.
 	MavenFallbackURL string
+	// ExpectedHash is the lowercase hex digest the downloaded bytes must match.
+	// Empty disables validation.
+	ExpectedHash string
+	// HashAlgo selects the algorithm: "sha256", "sha1", "sha512". Empty disables.
+	HashAlgo string
+	// MavenFallbackHash is the expected sha256 for MavenFallbackURL. Empty disables on fallback.
+	MavenFallbackHash string
 }
 
 type Result struct {
