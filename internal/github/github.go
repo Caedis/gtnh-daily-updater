@@ -33,6 +33,7 @@ type LatestResult struct {
 	Filename string
 	URL      string
 	IsAPI    bool
+	Digest   string // raw "sha256:..." from the chosen release asset
 }
 
 const releasesPerPage = 25
@@ -196,6 +197,7 @@ func selectLatestResult(releases []Release, token string, allowPre bool) (*Lates
 			Filename: strings.TrimSpace(asset.Name),
 			URL:      downloadURL,
 			IsAPI:    isAPI,
+			Digest:   asset.Digest,
 		}
 	}
 
