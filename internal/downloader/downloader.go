@@ -112,6 +112,13 @@ func downloadFileWithRetry(ctx context.Context, dl Download, destDir, githubToke
 	fallback.URL = dl.MavenFallbackURL
 	fallback.IsGitHubAPI = false
 	fallback.MavenFallbackURL = ""
+	if dl.MavenFallbackHash != "" {
+		fallback.ExpectedHash = dl.MavenFallbackHash
+		fallback.HashAlgo = "sha256"
+	} else {
+		fallback.ExpectedHash = ""
+		fallback.HashAlgo = ""
+	}
 	logging.Debugf(
 		"Verbose: github download failed for %s (%v); trying maven fallback url=%s\n",
 		dl.Filename,
