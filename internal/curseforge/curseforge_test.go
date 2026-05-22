@@ -3,6 +3,7 @@ package curseforge
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -216,5 +217,40 @@ func TestFileVersion(t *testing.T) {
 	f := File{ID: 4586932}
 	if got := FileVersion(f); got != "4586932" {
 		t.Errorf("FileVersion = %q, want %q", got, "4586932")
+	}
+}
+
+func TestFile_SHA1(t *testing.T) {
+	f := File{Hashes: []FileHash{
+		{Algo: 2, Value: "deadbeef"},
+		{Algo: 1, Value: "abc123"},
+	}}
+	if got := f.SHA1(); got != "abc123" {
+		t.Fatalf("SHA1 = %q, want abc123", got)
+	}
+	empty := File{}
+	if got := empty.SHA1(); got != "" {
+		t.Fatalf("SHA1 on empty = %q, want \"\"", got)
+	}
+}
+
+func TestFetchFile_ParsesHashes(t *testing.T) {
+	body := `{"data":{"id":42,"modId":1,"fileName":"x.jar","hashes":[{"value":"AABB","algo":1},{"value":"CCDD","algo":2}]}}`
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, body)
+	}))
+	defer srv.Close()
+	oldBase := baseURL
+	oldClient := httpClient
+	baseURL = srv.URL
+	httpClient = srv.Client()
+	defer func() { baseURL = oldBase; httpClient = oldClient }()
+
+	f, err := FetchFile(context.Background(), 1, 42, "key")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if f.SHA1() != "AABB" {
+		t.Fatalf("SHA1 = %q, want AABB", f.SHA1())
 	}
 }

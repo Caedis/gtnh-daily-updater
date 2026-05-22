@@ -20,15 +20,32 @@ var (
 	httpClient = http.DefaultClient
 )
 
+// FileHash is a CurseForge file hash entry. Algo: 1=sha1, 2=md5.
+type FileHash struct {
+	Value string `json:"value"`
+	Algo  int    `json:"algo"`
+}
+
 // File represents a CurseForge file entry.
 type File struct {
-	ID           int      `json:"id"`
-	ModID        int      `json:"modId"`
-	DisplayName  string   `json:"displayName"`
-	FileName     string   `json:"fileName"`
-	DownloadURL  string   `json:"downloadUrl"` // may be empty for some files
-	ReleaseType  int      `json:"releaseType"` // 1=Release, 2=Beta, 3=Alpha
-	GameVersions []string `json:"gameVersions"`
+	ID           int        `json:"id"`
+	ModID        int        `json:"modId"`
+	DisplayName  string     `json:"displayName"`
+	FileName     string     `json:"fileName"`
+	DownloadURL  string     `json:"downloadUrl"` // may be empty for some files
+	ReleaseType  int        `json:"releaseType"` // 1=Release, 2=Beta, 3=Alpha
+	GameVersions []string   `json:"gameVersions"`
+	Hashes       []FileHash `json:"hashes"`
+}
+
+// SHA1 returns the sha1 hex digest for this file, or "" if not present.
+func (f File) SHA1() string {
+	for _, h := range f.Hashes {
+		if h.Algo == 1 {
+			return h.Value
+		}
+	}
+	return ""
 }
 
 type fileResponse struct {
