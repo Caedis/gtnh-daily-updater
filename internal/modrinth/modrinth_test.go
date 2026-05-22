@@ -3,6 +3,7 @@ package modrinth
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -225,5 +226,29 @@ func TestProjectExists(t *testing.T) {
 	}
 	if ok, err := ProjectExists(context.Background(), "missing"); err != nil || ok {
 		t.Errorf("ProjectExists(missing) = (%v, %v), want (false, nil)", ok, err)
+	}
+}
+
+func TestVersion_FilesHashes(t *testing.T) {
+	body := `{"id":"v1","project_id":"p","version_number":"1.0","version_type":"release","loaders":["forge"],"game_versions":["1.12.2"],"files":[{"url":"http://x/x.jar","filename":"x.jar","primary":true,"hashes":{"sha1":"aa","sha512":"bb"}}]}`
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, body)
+	}))
+	defer srv.Close()
+	oldBase := baseURL
+	oldClient := httpClient
+	baseURL = srv.URL
+	httpClient = srv.Client()
+	defer func() { baseURL = oldBase; httpClient = oldClient }()
+
+	v, err := FetchVersion(context.Background(), "v1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(v.Files) == 0 || v.Files[0].Hashes.SHA512 != "bb" {
+		t.Fatalf("SHA512 = %q, want bb", v.Files[0].Hashes.SHA512)
+	}
+	if v.Files[0].Hashes.SHA1 != "aa" {
+		t.Fatalf("SHA1 = %q, want aa", v.Files[0].Hashes.SHA1)
 	}
 }

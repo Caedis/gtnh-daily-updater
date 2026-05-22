@@ -33,11 +33,18 @@ func SetVersion(v string) {
 	UserAgent = "github.com/caedis/gtnh-daily-updater/" + v
 }
 
+// FileHashes holds the cryptographic hashes for a Modrinth file.
+type FileHashes struct {
+	SHA1   string `json:"sha1"`
+	SHA512 string `json:"sha512"`
+}
+
 // File represents a file attached to a Modrinth version.
 type File struct {
-	URL      string `json:"url"`
-	Filename string `json:"filename"`
-	Primary  bool   `json:"primary"`
+	URL      string     `json:"url"`
+	Filename string     `json:"filename"`
+	Primary  bool       `json:"primary"`
+	Hashes   FileHashes `json:"hashes"`
 }
 
 // Version represents a Modrinth project version.
