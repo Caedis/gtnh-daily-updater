@@ -101,3 +101,63 @@ func TestRun_EmptyAlgoSkipsValidation(t *testing.T) {
 		t.Fatalf("err = %v", results[0].Err)
 	}
 }
+
+func TestRun_CacheHit_ValidatesAndReplaces(t *testing.T) {
+	var serverHits atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		serverHits.Add(1)
+		fmt.Fprint(w, goodBytes)
+	}))
+	defer srv.Close()
+
+	cache := t.TempDir()
+	dest := t.TempDir()
+
+	modDir := filepath.Join(cache, "m")
+	if err := os.MkdirAll(modDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(modDir, "x.jar"), []byte("corrupt"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	results := Run(context.Background(),
+		[]Download{{URL: srv.URL, Filename: "x.jar", ModName: "m", ExpectedHash: goodSHA256, HashAlgo: "sha256"}},
+		dest, 1, "", cache, nil,
+	)
+	if results[0].Err != nil {
+		t.Fatalf("err = %v", results[0].Err)
+	}
+	if serverHits.Load() == 0 {
+		t.Fatal("expected server to be contacted after cache invalidation")
+	}
+	got, _ := os.ReadFile(filepath.Join(dest, "x.jar"))
+	if string(got) != goodBytes {
+		t.Fatalf("dest = %q", got)
+	}
+	cached, _ := os.ReadFile(filepath.Join(modDir, "x.jar"))
+	if string(cached) != goodBytes {
+		t.Fatalf("cache not replaced: %q", cached)
+	}
+}
+
+func TestRun_CacheHit_ValidMatches(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Fatal("server should not be contacted")
+	}))
+	defer srv.Close()
+
+	cache := t.TempDir()
+	dest := t.TempDir()
+	modDir := filepath.Join(cache, "m")
+	os.MkdirAll(modDir, 0755)
+	os.WriteFile(filepath.Join(modDir, "x.jar"), []byte(goodBytes), 0644)
+
+	results := Run(context.Background(),
+		[]Download{{URL: srv.URL, Filename: "x.jar", ModName: "m", ExpectedHash: goodSHA256, HashAlgo: "sha256"}},
+		dest, 1, "", cache, nil,
+	)
+	if results[0].Err != nil {
+		t.Fatalf("err = %v", results[0].Err)
+	}
+}

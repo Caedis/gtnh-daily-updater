@@ -166,15 +166,33 @@ func downloadFile(ctx context.Context, dl Download, destDir, githubToken, cacheD
 		modCacheDir := filepath.Join(cacheDir, safeModName)
 		cachePath := filepath.Join(modCacheDir, safeFilename)
 		if _, err := os.Stat(cachePath); err == nil {
-			logging.Debugf("Verbose: cache hit mod=%s file=%s\n", dl.ModName, dl.Filename)
-			return copyFile(cachePath, destPath)
+			if vErr := validateCachedFile(cachePath, dl.HashAlgo, dl.ExpectedHash); vErr != nil {
+				if errors.Is(vErr, ErrHashMismatch) {
+					logging.Debugf("Verbose: cache invalid mod=%s file=%s err=%v\n", dl.ModName, dl.Filename, vErr)
+					os.Remove(cachePath)
+				} else {
+					return vErr
+				}
+			} else {
+				logging.Debugf("Verbose: cache hit mod=%s file=%s\n", dl.ModName, dl.Filename)
+				return copyFile(cachePath, destPath)
+			}
 		}
 		// Fall back to old unsanitized cache path for backwards compatibility
 		oldCachePath := filepath.Join(cacheDir, dl.ModName, dl.Filename)
 		if oldCachePath != cachePath {
 			if _, err := os.Stat(oldCachePath); err == nil {
-				logging.Debugf("Verbose: cache hit (legacy path) mod=%s file=%s\n", dl.ModName, dl.Filename)
-				return copyFile(oldCachePath, destPath)
+				if vErr := validateCachedFile(oldCachePath, dl.HashAlgo, dl.ExpectedHash); vErr != nil {
+					if errors.Is(vErr, ErrHashMismatch) {
+						logging.Debugf("Verbose: legacy cache invalid mod=%s file=%s err=%v\n", dl.ModName, dl.Filename, vErr)
+						os.Remove(oldCachePath)
+					} else {
+						return vErr
+					}
+				} else {
+					logging.Debugf("Verbose: cache hit (legacy path) mod=%s file=%s\n", dl.ModName, dl.Filename)
+					return copyFile(oldCachePath, destPath)
+				}
 			}
 		}
 		logging.Debugf("Verbose: cache miss mod=%s file=%s\n", dl.ModName, dl.Filename)
@@ -318,6 +336,32 @@ func newHasher(algo string) (*hasher, error) {
 
 func (h *hasher) Write(p []byte) (int, error) { return h.h.Write(p) }
 func (h *hasher) Hex() string                 { return hex.EncodeToString(h.h.Sum(nil)) }
+
+// validateCachedFile streams the cached file through a hasher. Returns
+// ErrHashMismatch (wrapped) if mismatch, nil if match or algo is empty.
+func validateCachedFile(path, algo, expected string) error {
+	if algo == "" || expected == "" {
+		return nil
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	h, err := newHasher(algo)
+	if err != nil {
+		return err
+	}
+	if _, err := io.Copy(h, f); err != nil {
+		return err
+	}
+	got := h.Hex()
+	want := strings.ToLower(expected)
+	if got != want {
+		return fmt.Errorf("cache %s: %w (algo=%s got=%s want=%s)", filepath.Base(path), ErrHashMismatch, algo, got, want)
+	}
+	return nil
+}
 
 // writeAndHash copies src to dstPath via a .tmp file, optionally validating the
 // hash. On mismatch the .tmp is removed and an ErrHashMismatch-wrapped error
