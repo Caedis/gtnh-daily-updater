@@ -26,27 +26,31 @@ import (
 
 // resolveModDownload resolves the download URL and filename for a mod, trying
 // extra downloads, --latest GitHub downloads, GitHub auth/public, and Maven in order.
-func resolveModDownload(db *assets.AssetsDB, modName, version, githubToken string, extraDownloads, latestDownloads map[string]resolvedExtra) (dl downloader.Download, ok bool) {
+func resolveModDownload(ctx context.Context, db *assets.AssetsDB, modName, version, githubToken string, extraDownloads, latestDownloads map[string]resolvedExtra) (dl downloader.Download, ok bool) {
 	// Extra mod with pre-resolved download info
 	if dlInfo, isExtra := extraDownloads[modName]; isExtra {
 		dl := downloader.Download{
-			URL:         dlInfo.URL,
-			Filename:    dlInfo.Filename,
-			ModName:     modName,
-			IsGitHubAPI: dlInfo.IsGitHubAPI,
+			URL:          dlInfo.URL,
+			Filename:     dlInfo.Filename,
+			ModName:      modName,
+			IsGitHubAPI:  dlInfo.IsGitHubAPI,
+			ExpectedHash: dlInfo.ExpectedHash,
+			HashAlgo:     dlInfo.HashAlgo,
 		}
-		return withMavenFallback(dl, db, modName, version), true
+		return withMavenFallback(ctx, dl, db, modName, version), true
 	}
 
 	// --latest resolved from GitHub directly
 	if dlInfo, found := latestDownloads[modName]; found {
 		dl := downloader.Download{
-			URL:         dlInfo.URL,
-			Filename:    dlInfo.Filename,
-			ModName:     modName,
-			IsGitHubAPI: dlInfo.IsGitHubAPI,
+			URL:          dlInfo.URL,
+			Filename:     dlInfo.Filename,
+			ModName:      modName,
+			IsGitHubAPI:  dlInfo.IsGitHubAPI,
+			ExpectedHash: dlInfo.ExpectedHash,
+			HashAlgo:     dlInfo.HashAlgo,
 		}
-		return withMavenFallback(dl, db, modName, version), true
+		return withMavenFallback(ctx, dl, db, modName, version), true
 	}
 
 	// GitHub with auth
@@ -58,7 +62,7 @@ func resolveModDownload(db *assets.AssetsDB, modName, version, githubToken strin
 				ModName:     modName,
 				IsGitHubAPI: true,
 			}
-			return withMavenFallback(dl, db, modName, version), true
+			return withMavenFallback(ctx, dl, db, modName, version), true
 		}
 	}
 
@@ -69,24 +73,25 @@ func resolveModDownload(db *assets.AssetsDB, modName, version, githubToken strin
 			Filename: filename,
 			ModName:  modName,
 		}
-		return withMavenFallback(dl, db, modName, version), true
+		return withMavenFallback(ctx, dl, db, modName, version), true
 	}
 
 	// Maven fallback for GTNH-hosted mods
 	if db.IsGTNH(modName) {
 		if mavenURL, mavenFn := maven.DownloadURL(modName, version); mavenURL != "" && mavenFn != "" {
-			return downloader.Download{
-				URL:      mavenURL,
-				Filename: mavenFn,
-				ModName:  modName,
-			}, true
+			d := downloader.Download{URL: mavenURL, Filename: mavenFn, ModName: modName}
+			if sha, _ := maven.FetchSHA256(ctx, mavenURL); sha != "" {
+				d.ExpectedHash = sha
+				d.HashAlgo = "sha256"
+			}
+			return d, true
 		}
 	}
 
 	return downloader.Download{}, false
 }
 
-func withMavenFallback(dl downloader.Download, db *assets.AssetsDB, modName, version string) downloader.Download {
+func withMavenFallback(ctx context.Context, dl downloader.Download, db *assets.AssetsDB, modName, version string) downloader.Download {
 	if !db.IsGTNH(modName) || !isGitHubDownload(dl.URL, dl.IsGitHubAPI) {
 		return dl
 	}
@@ -95,6 +100,9 @@ func withMavenFallback(dl downloader.Download, db *assets.AssetsDB, modName, ver
 		return dl
 	}
 	dl.MavenFallbackURL = mavenURL
+	if sha, _ := maven.FetchSHA256(ctx, mavenURL); sha != "" {
+		dl.MavenFallbackHash = sha
+	}
 	return dl
 }
 

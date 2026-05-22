@@ -207,12 +207,12 @@ func selectDownloadChanges(changes []diff.ModChange) []diff.ModChange {
 	return needsDownload
 }
 
-func resolveDownloadsForChanges(needsDownload []diff.ModChange, db *assets.AssetsDB, opts Options, extraDownloads, latestDownloads map[string]resolvedExtra) ([]downloader.Download, error) {
+func resolveDownloadsForChanges(ctx context.Context, needsDownload []diff.ModChange, db *assets.AssetsDB, opts Options, extraDownloads, latestDownloads map[string]resolvedExtra) ([]downloader.Download, error) {
 	var downloads []downloader.Download
 	var unresolved []string
 
 	for _, c := range needsDownload {
-		dl, ok := resolveModDownload(db, c.Name, c.NewVersion, opts.GithubToken, extraDownloads, latestDownloads)
+		dl, ok := resolveModDownload(ctx, db, c.Name, c.NewVersion, opts.GithubToken, extraDownloads, latestDownloads)
 		if !ok {
 			unresolved = append(unresolved, c.Name)
 			continue
@@ -368,12 +368,12 @@ func snapshotAndUpdateConfigsIfNeeded(ctx context.Context, state *config.LocalSt
 	return nil
 }
 
-func persistUpdatedState(state *config.LocalState, changes []diff.ModChange, m *manifest.DailyManifest, mode string, opts Options, db *assets.AssetsDB, extraDownloads, latestDownloads map[string]resolvedExtra, rollback func(error) error, configVersion string, result *UpdateResult) error {
+func persistUpdatedState(ctx context.Context, state *config.LocalState, changes []diff.ModChange, m *manifest.DailyManifest, mode string, opts Options, db *assets.AssetsDB, extraDownloads, latestDownloads map[string]resolvedExtra, rollback func(error) error, configVersion string, result *UpdateResult) error {
 	for _, c := range changes {
 		switch c.Type {
 		case diff.Added, diff.Updated:
 			filename := ""
-			if dl, ok := resolveModDownload(db, c.Name, c.NewVersion, opts.GithubToken, extraDownloads, latestDownloads); ok {
+			if dl, ok := resolveModDownload(ctx, db, c.Name, c.NewVersion, opts.GithubToken, extraDownloads, latestDownloads); ok {
 				filename = dl.Filename
 			}
 			state.Mods[c.Name] = config.InstalledMod{

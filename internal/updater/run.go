@@ -93,7 +93,7 @@ func Run(ctx context.Context, opts Options) (*UpdateResult, error) {
 	}
 
 	needsDownload := selectDownloadChanges(changes)
-	downloads, err := resolveDownloadsForChanges(needsDownload, db, opts, extraDownloads, latestDownloads)
+	downloads, err := resolveDownloadsForChanges(ctx, needsDownload, db, opts, extraDownloads, latestDownloads)
 	if err != nil {
 		return nil, err
 	}
@@ -115,7 +115,7 @@ func Run(ctx context.Context, opts Options) (*UpdateResult, error) {
 	if err := snapshotAndUpdateConfigsIfNeeded(ctx, state, gameDir, result, rollback, effectiveConfigVersion); err != nil {
 		return nil, err
 	}
-	if err := persistUpdatedState(state, changes, m, mode, opts, db, extraDownloads, latestDownloads, rollback, effectiveConfigVersion, result); err != nil {
+	if err := persistUpdatedState(ctx, state, changes, m, mode, opts, db, extraDownloads, latestDownloads, rollback, effectiveConfigVersion, result); err != nil {
 		return nil, err
 	}
 
