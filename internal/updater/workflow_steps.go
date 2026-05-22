@@ -2,6 +2,7 @@ package updater
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"maps"
 	"os"
@@ -207,12 +208,12 @@ func selectDownloadChanges(changes []diff.ModChange) []diff.ModChange {
 	return needsDownload
 }
 
-func resolveDownloadsForChanges(needsDownload []diff.ModChange, db *assets.AssetsDB, opts Options, extraDownloads, latestDownloads map[string]resolvedExtra) ([]downloader.Download, error) {
+func resolveDownloadsForChanges(ctx context.Context, needsDownload []diff.ModChange, db *assets.AssetsDB, opts Options, extraDownloads, latestDownloads map[string]resolvedExtra) ([]downloader.Download, error) {
 	var downloads []downloader.Download
 	var unresolved []string
 
 	for _, c := range needsDownload {
-		dl, ok := resolveModDownload(db, c.Name, c.NewVersion, opts.GithubToken, extraDownloads, latestDownloads)
+		dl, ok := resolveModDownload(ctx, db, c.Name, c.NewVersion, opts.GithubToken, extraDownloads, latestDownloads)
 		if !ok {
 			unresolved = append(unresolved, c.Name)
 			continue
@@ -305,10 +306,17 @@ func downloadMods(ctx context.Context, downloads []downloader.Download, needsDow
 	logging.Infoln()
 
 	var failed []string
+	var hashFailed []string
 	for _, r := range results {
 		if r.Err != nil {
 			failed = append(failed, fmt.Sprintf("%s: %v", r.Download.Filename, r.Err))
+			if errors.Is(r.Err, downloader.ErrHashMismatch) {
+				hashFailed = append(hashFailed, r.Download.Filename)
+			}
 		}
+	}
+	if len(hashFailed) > 0 {
+		return rollback(fmt.Errorf("hash validation failed after 3 retries for: %s (all download errors: %s)", strings.Join(hashFailed, ", "), strings.Join(failed, "; ")))
 	}
 	if len(failed) > 0 {
 		return rollback(fmt.Errorf("download failures: %s", strings.Join(failed, "; ")))
@@ -368,12 +376,12 @@ func snapshotAndUpdateConfigsIfNeeded(ctx context.Context, state *config.LocalSt
 	return nil
 }
 
-func persistUpdatedState(state *config.LocalState, changes []diff.ModChange, m *manifest.DailyManifest, mode string, opts Options, db *assets.AssetsDB, extraDownloads, latestDownloads map[string]resolvedExtra, rollback func(error) error, configVersion string, result *UpdateResult) error {
+func persistUpdatedState(ctx context.Context, state *config.LocalState, changes []diff.ModChange, m *manifest.DailyManifest, mode string, opts Options, db *assets.AssetsDB, extraDownloads, latestDownloads map[string]resolvedExtra, rollback func(error) error, configVersion string, result *UpdateResult) error {
 	for _, c := range changes {
 		switch c.Type {
 		case diff.Added, diff.Updated:
 			filename := ""
-			if dl, ok := resolveModDownload(db, c.Name, c.NewVersion, opts.GithubToken, extraDownloads, latestDownloads); ok {
+			if dl, ok := resolveModDownload(ctx, db, c.Name, c.NewVersion, opts.GithubToken, extraDownloads, latestDownloads); ok {
 				filename = dl.Filename
 			}
 			state.Mods[c.Name] = config.InstalledMod{

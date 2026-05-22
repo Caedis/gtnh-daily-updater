@@ -133,3 +133,30 @@ func SanitizeComponent(s string) string {
 func MavenFilename(modName, version string) string {
 	return SanitizeComponent(modName) + "-" + SanitizeComponent(version) + ".jar"
 }
+
+// FetchSHA256 fetches the `<jarURL>.sha256` sidecar and returns the lowercase
+// hex digest. A 404 returns ("", nil) so callers can degrade gracefully.
+func FetchSHA256(ctx context.Context, jarURL string) (string, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, jarURL+".sha256", nil)
+	if err != nil {
+		return "", fmt.Errorf("creating sha256 request: %w", err)
+	}
+	resp, err := HTTPClient.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("fetching sha256 sidecar: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusNotFound {
+		return "", nil
+	}
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("sha256 sidecar HTTP %d", resp.StatusCode)
+	}
+	buf := make([]byte, 256)
+	n, _ := resp.Body.Read(buf)
+	s := strings.TrimSpace(string(buf[:n]))
+	if i := strings.IndexAny(s, " \t"); i >= 0 {
+		s = s[:i]
+	}
+	return strings.ToLower(s), nil
+}

@@ -43,7 +43,10 @@ type UpdateResult struct {
 
 // resolvedExtra holds download info for an extra mod resolved before download.
 type resolvedExtra struct {
-	URL         string
-	Filename    string
-	IsGitHubAPI bool
+	URL               string
+	Filename          string
+	IsGitHubAPI       bool
+	ExpectedHash      string
+	HashAlgo          string
+	MavenFallbackHash string
 }
