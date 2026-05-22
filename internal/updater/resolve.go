@@ -264,11 +264,16 @@ func resolveLatestVersions(ctx context.Context, db *assets.AssetsDB, changes []d
 			if changes[r.idx].Type == diff.Unchanged {
 				changes[r.idx].Type = diff.Updated
 			}
-			latestDownloads[changes[r.idx].Name] = resolvedExtra{
+			extra := resolvedExtra{
 				URL:         r.result.URL,
 				Filename:    r.result.Filename,
 				IsGitHubAPI: r.result.IsAPI,
 			}
+			if d := strings.TrimPrefix(r.result.Digest, "sha256:"); d != "" && d != r.result.Digest {
+				extra.ExpectedHash = d
+				extra.HashAlgo = "sha256"
+			}
+			latestDownloads[changes[r.idx].Name] = extra
 		}
 	}
 
