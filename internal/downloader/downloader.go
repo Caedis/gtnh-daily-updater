@@ -14,6 +14,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -200,65 +201,23 @@ func downloadFile(ctx context.Context, dl Download, destDir, githubToken, cacheD
 		return fmt.Errorf("downloading %s: HTTP %d", dl.Filename, resp.StatusCode)
 	}
 
-	// If caching, download to cache first, then copy to dest
 	if cacheDir != "" {
 		modCacheDir := filepath.Join(cacheDir, safeModName)
 		if err := os.MkdirAll(modCacheDir, 0755); err != nil {
 			return fmt.Errorf("creating cache dir for %s: %w", dl.ModName, err)
 		}
 		cachePath := filepath.Join(modCacheDir, safeFilename)
-		cacheTmp := cachePath + ".tmp"
-
-		f, err := os.Create(cacheTmp)
-		if err != nil {
-			return fmt.Errorf("creating cache file for %s: %w", dl.Filename, err)
+		if err := writeAndHash(resp.Body, cachePath, dl.HashAlgo, dl.ExpectedHash, dl.Filename); err != nil {
+			return err
 		}
-
-		_, err = io.Copy(f, resp.Body)
-		closeErr := f.Close()
-		if err != nil {
-			os.Remove(cacheTmp)
-			return fmt.Errorf("writing %s: %w", dl.Filename, err)
-		}
-		if closeErr != nil {
-			os.Remove(cacheTmp)
-			return fmt.Errorf("closing %s: %w", dl.Filename, closeErr)
-		}
-
-		if err := os.Rename(cacheTmp, cachePath); err != nil {
-			os.Remove(cacheTmp)
-			return fmt.Errorf("finalizing cache for %s: %w", dl.Filename, err)
-		}
-
 		evictOldCacheFiles(modCacheDir, 5)
 		return copyFile(cachePath, destPath)
 	}
 
-	// No cache — download directly to destDir
-	tmpPath := destPath + ".tmp"
-
-	f, err := os.Create(tmpPath)
-	if err != nil {
-		return fmt.Errorf("creating %s: %w", dl.Filename, err)
-	}
-
-	_, err = io.Copy(f, resp.Body)
-	closeErr := f.Close()
-	if err != nil {
-		os.Remove(tmpPath)
-		return fmt.Errorf("writing %s: %w", dl.Filename, err)
-	}
-	if closeErr != nil {
-		os.Remove(tmpPath)
-		return fmt.Errorf("closing %s: %w", dl.Filename, closeErr)
-	}
-
-	if err := os.Rename(tmpPath, destPath); err != nil {
-		os.Remove(tmpPath)
-		return fmt.Errorf("finalizing %s: %w", dl.Filename, err)
+	if err := writeAndHash(resp.Body, destPath, dl.HashAlgo, dl.ExpectedHash, dl.Filename); err != nil {
+		return err
 	}
 	logging.Debugf("Verbose: download complete file=%s\n", dl.Filename)
-
 	return nil
 }
 
@@ -359,6 +318,55 @@ func newHasher(algo string) (*hasher, error) {
 
 func (h *hasher) Write(p []byte) (int, error) { return h.h.Write(p) }
 func (h *hasher) Hex() string                 { return hex.EncodeToString(h.h.Sum(nil)) }
+
+// writeAndHash copies src to dstPath via a .tmp file, optionally validating the
+// hash. On mismatch the .tmp is removed and an ErrHashMismatch-wrapped error
+// is returned.
+func writeAndHash(src io.Reader, dstPath, algo, expected, label string) error {
+	tmpPath := dstPath + ".tmp"
+	f, err := os.Create(tmpPath)
+	if err != nil {
+		return fmt.Errorf("creating %s: %w", label, err)
+	}
+
+	var h *hasher
+	var w io.Writer = f
+	if algo != "" && expected != "" {
+		h, err = newHasher(algo)
+		if err != nil {
+			f.Close()
+			os.Remove(tmpPath)
+			return err
+		}
+		w = io.MultiWriter(f, h)
+	}
+
+	_, copyErr := io.Copy(w, src)
+	closeErr := f.Close()
+	if copyErr != nil {
+		os.Remove(tmpPath)
+		return fmt.Errorf("writing %s: %w", label, copyErr)
+	}
+	if closeErr != nil {
+		os.Remove(tmpPath)
+		return fmt.Errorf("closing %s: %w", label, closeErr)
+	}
+
+	if h != nil {
+		got := h.Hex()
+		want := strings.ToLower(expected)
+		if got != want {
+			os.Remove(tmpPath)
+			return fmt.Errorf("%s: %w (algo=%s got=%s want=%s)", label, ErrHashMismatch, algo, got, want)
+		}
+	}
+
+	if err := os.Rename(tmpPath, dstPath); err != nil {
+		os.Remove(tmpPath)
+		return fmt.Errorf("finalizing %s: %w", label, err)
+	}
+	return nil
+}
 
 // evictOldCacheFiles removes the oldest files in dir, keeping only the newest
 // keep entries. Errors are logged but not returned since eviction is best-effort.

@@ -1,7 +1,6 @@
 package downloader
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -9,7 +8,6 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
-	"strings"
 	"sync/atomic"
 	"testing"
 )
@@ -41,14 +39,65 @@ func TestNewHasher_Algos(t *testing.T) {
 	}
 }
 
-// Keep imports satisfied for later tasks that will add tests using these.
-var _ = bytes.NewBuffer
-var _ = context.Background
-var _ = errors.Is
-var _ = fmt.Sprint
-var _ = http.MethodGet
-var _ = httptest.NewServer
-var _ = os.Open
-var _ = filepath.Join
-var _ = strings.TrimSpace
-var _ atomic.Int32
+// sha256 of "good-bytes"
+const goodBytes = "good-bytes"
+const goodSHA256 = "d79d9fd44ad034758fbdc3b2fa305894e98f111aae32efeb2c70a3b97cd0a456"
+
+func TestRun_HashMatchSucceeds(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, goodBytes)
+	}))
+	defer srv.Close()
+
+	dest := t.TempDir()
+	results := Run(context.Background(),
+		[]Download{{URL: srv.URL, Filename: "x.jar", ModName: "m", ExpectedHash: goodSHA256, HashAlgo: "sha256"}},
+		dest, 1, "", "", nil,
+	)
+	if results[0].Err != nil {
+		t.Fatalf("err = %v", results[0].Err)
+	}
+	got, _ := os.ReadFile(filepath.Join(dest, "x.jar"))
+	if string(got) != goodBytes {
+		t.Fatalf("file = %q", got)
+	}
+}
+
+func TestRun_HashMismatchRetriesAndFails(t *testing.T) {
+	var hits atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits.Add(1)
+		fmt.Fprint(w, "wrong-bytes")
+	}))
+	defer srv.Close()
+
+	dest := t.TempDir()
+	results := Run(context.Background(),
+		[]Download{{URL: srv.URL, Filename: "x.jar", ModName: "m", ExpectedHash: goodSHA256, HashAlgo: "sha256"}},
+		dest, 1, "", "", nil,
+	)
+	if !errors.Is(results[0].Err, ErrHashMismatch) {
+		t.Fatalf("err = %v, want ErrHashMismatch", results[0].Err)
+	}
+	if hits.Load() != int32(maxRetries) {
+		t.Fatalf("hits = %d, want %d", hits.Load(), maxRetries)
+	}
+	if _, err := os.Stat(filepath.Join(dest, "x.jar")); !os.IsNotExist(err) {
+		t.Fatal("dest file should not exist after mismatch")
+	}
+}
+
+func TestRun_EmptyAlgoSkipsValidation(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, "anything")
+	}))
+	defer srv.Close()
+	dest := t.TempDir()
+	results := Run(context.Background(),
+		[]Download{{URL: srv.URL, Filename: "x.jar", ModName: "m"}},
+		dest, 1, "", "", nil,
+	)
+	if results[0].Err != nil {
+		t.Fatalf("err = %v", results[0].Err)
+	}
+}
