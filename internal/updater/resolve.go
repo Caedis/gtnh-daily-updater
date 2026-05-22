@@ -304,10 +304,12 @@ func resolveExtraMod(ctx context.Context, name string, spec config.ExtraModSpec,
 		if db.IsGTNH(name) {
 			mavenURL, mavenFn := maven.DownloadURL(name, version)
 			logging.Debugf("Verbose: extra mod %s using maven download filename=%s\n", name, mavenFn)
-			return diff.ResolvedExtraMod{Version: version, Side: modSide}, resolvedExtra{
-				URL:      mavenURL,
-				Filename: mavenFn,
-			}, nil
+			extra := resolvedExtra{URL: mavenURL, Filename: mavenFn}
+			if sha, _ := maven.FetchSHA256(ctx, mavenURL); sha != "" {
+				extra.ExpectedHash = sha
+				extra.HashAlgo = "sha256"
+			}
+			return diff.ResolvedExtraMod{Version: version, Side: modSide}, extra, nil
 		}
 
 		url, filename, isAPI, err := db.ResolveDownload(name, version)
@@ -356,10 +358,12 @@ func resolveExtraMod(ctx context.Context, name string, spec config.ExtraModSpec,
 
 		version := strconv.Itoa(file.ID)
 		logging.Debugf("Verbose: extra mod %s CurseForge project=%d file=%d filename=%s\n", name, projectID, file.ID, file.FileName)
-		return diff.ResolvedExtraMod{Version: version, Side: modSide}, resolvedExtra{
-			URL:      downloadURL,
-			Filename: file.FileName,
-		}, nil
+		extra := resolvedExtra{URL: downloadURL, Filename: file.FileName}
+		if sha := file.SHA1(); sha != "" {
+			extra.ExpectedHash = sha
+			extra.HashAlgo = "sha1"
+		}
+		return diff.ResolvedExtraMod{Version: version, Side: modSide}, extra, nil
 
 	case strings.HasPrefix(spec.Source, "modrinth:"):
 		rest := strings.TrimPrefix(spec.Source, "modrinth:")
@@ -384,10 +388,12 @@ func resolveExtraMod(ctx context.Context, name string, spec config.ExtraModSpec,
 		}
 
 		logging.Debugf("Verbose: extra mod %s Modrinth project=%s version=%s filename=%s\n", name, project, ver.ID, file.Filename)
-		return diff.ResolvedExtraMod{Version: ver.ID, Side: modSide}, resolvedExtra{
-			URL:      file.URL,
-			Filename: file.Filename,
-		}, nil
+		extra := resolvedExtra{URL: file.URL, Filename: file.Filename}
+		if file.Hashes.SHA512 != "" {
+			extra.ExpectedHash = file.Hashes.SHA512
+			extra.HashAlgo = "sha512"
+		}
+		return diff.ResolvedExtraMod{Version: ver.ID, Side: modSide}, extra, nil
 
 	case strings.HasPrefix(spec.Source, "github:"):
 		repo := strings.TrimPrefix(spec.Source, "github:")
@@ -459,11 +465,12 @@ func resolveExtraMod(ctx context.Context, name string, spec config.ExtraModSpec,
 			return diff.ResolvedExtraMod{}, resolvedExtra{}, fmt.Errorf("release asset %s has no download URL", asset.Name)
 		}
 		logging.Debugf("Verbose: extra mod %s GitHub release=%s asset=%s\n", name, version, asset.Name)
-		return diff.ResolvedExtraMod{Version: version, Side: modSide}, resolvedExtra{
-			URL:         downloadURL,
-			Filename:    asset.Name,
-			IsGitHubAPI: isGitHubAPI,
-		}, nil
+		extra := resolvedExtra{URL: downloadURL, Filename: asset.Name, IsGitHubAPI: isGitHubAPI}
+		if d := strings.TrimPrefix(asset.Digest, "sha256:"); d != "" && d != asset.Digest {
+			extra.ExpectedHash = d
+			extra.HashAlgo = "sha256"
+		}
+		return diff.ResolvedExtraMod{Version: version, Side: modSide}, extra, nil
 
 	default:
 		// Direct URL source
