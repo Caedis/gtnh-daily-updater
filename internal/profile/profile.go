@@ -53,6 +53,14 @@ func Load(name string) (*Profile, error) {
 		}
 	}
 
+	// Expand a leading "~" in stored path values; profiles are hand-editable
+	// and a quoted "~" in the source is never expanded by the shell.
+	for _, ptr := range []*string{p.InstanceDir, p.CacheDir, p.LogFile} {
+		if ptr != nil {
+			*ptr = paths.ExpandTilde(*ptr)
+		}
+	}
+
 	return &p, nil
 }
 
