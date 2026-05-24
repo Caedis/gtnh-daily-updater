@@ -44,6 +44,39 @@ func TestNewHasher_Algos(t *testing.T) {
 const goodBytes = "good-bytes"
 const goodSHA256 = "d79d9fd44ad034758fbdc3b2fa305894e98f111aae32efeb2c70a3b97cd0a456"
 
+func TestRun_DisabledWritesDisabledDestButCachesClean(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, goodBytes)
+	}))
+	defer srv.Close()
+
+	cache := t.TempDir()
+	dest := t.TempDir()
+	results := Run(context.Background(),
+		[]Download{{URL: srv.URL, Filename: "x.jar", ModName: "m", Disabled: true}},
+		dest, 1, "", cache, nil,
+	)
+	if results[0].Err != nil {
+		t.Fatalf("err = %v", results[0].Err)
+	}
+
+	// On-disk mod keeps the .disabled suffix.
+	if got, _ := os.ReadFile(filepath.Join(dest, "x.jar.disabled")); string(got) != goodBytes {
+		t.Fatalf("disabled dest file = %q", got)
+	}
+	if _, err := os.Stat(filepath.Join(dest, "x.jar")); !os.IsNotExist(err) {
+		t.Fatalf("plain .jar should not exist, stat err=%v", err)
+	}
+
+	// Cache is keyed on the clean filename so it stays shareable.
+	if _, err := os.Stat(filepath.Join(cache, "m", "x.jar")); err != nil {
+		t.Fatalf("clean cache entry missing: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(cache, "m", "x.jar.disabled")); !os.IsNotExist(err) {
+		t.Fatalf("cache should not hold .disabled variant, stat err=%v", err)
+	}
+}
+
 func TestRun_HashMatchSucceeds(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprint(w, goodBytes)

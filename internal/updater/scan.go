@@ -32,13 +32,13 @@ func scanInstalledMods(modsDir string, filenameIdx map[string][]assets.FilenameM
 			return nil
 		}
 
-		if filepath.Ext(d.Name()) != ".jar" {
+		fn := d.Name()
+		lookup, ok := jarLookupName(fn)
+		if !ok {
 			return nil
 		}
 
-		fn := d.Name()
-
-		matches := filenameIdx[fn]
+		matches := filenameIdx[lookup]
 		if len(matches) == 0 {
 			logging.Debugf("Verbose: unmatched jar skipped during scan: %s\n", fn)
 			return nil
@@ -81,6 +81,27 @@ func scanInstalledMods(modsDir string, filenameIdx map[string][]assets.FilenameM
 	return mods, nil
 }
 
+// disabledSuffix is appended to mod filenames by Prism/MultiMC to disable a mod
+// without deleting it (e.g. "SomeMod-1.2.3.jar.disabled").
+const disabledSuffix = ".disabled"
+
+// jarLookupName returns the assets-DB lookup key for an on-disk mod file. It
+// accepts plain `.jar` files and `.jar.disabled` files, returning the
+// underlying `.jar` name. The second return is false for any other file.
+func jarLookupName(filename string) (string, bool) {
+	name := strings.TrimSuffix(filename, disabledSuffix)
+	if filepath.Ext(name) != ".jar" {
+		return "", false
+	}
+	return name, true
+}
+
+// isDisabledFilename reports whether an on-disk mod filename carries the
+// disabled suffix.
+func isDisabledFilename(filename string) bool {
+	return strings.HasSuffix(filename, ".jar"+disabledSuffix)
+}
+
 // pickBestMatch selects the best filename match when there are multiple candidates.
 // It prefers mods that are in the current manifest.
 func pickBestMatch(matches []assets.FilenameMatch, manifestMods map[string]manifest.ModInfo) assets.FilenameMatch {
@@ -110,7 +131,8 @@ func buildVersionPattern(filename, version string) (*regexp.Regexp, bool) {
 	escaped := regexp.QuoteMeta(filename)
 	escapedVer := regexp.QuoteMeta(version)
 	patStr := strings.Replace(escaped, escapedVer, `.*`, 1)
-	return regexp.MustCompile(`(?i)^` + patStr + `$`), true
+	// Allow an optional trailing `.disabled` so manually disabled jars match too.
+	return regexp.MustCompile(`(?i)^` + patStr + `(?:` + regexp.QuoteMeta(disabledSuffix) + `)?$`), true
 }
 
 // detectStaleJars finds disk jars that belong to manifest mods not yet present
@@ -197,7 +219,7 @@ func listTopLevelJarFiles(modsDir string) (map[string]bool, error) {
 		if d.IsDir() {
 			return filepath.SkipDir
 		}
-		if filepath.Ext(d.Name()) == ".jar" {
+		if _, ok := jarLookupName(d.Name()); ok {
 			files[d.Name()] = true
 		}
 		return nil

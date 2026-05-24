@@ -43,6 +43,10 @@ type Download struct {
 	HashAlgo string
 	// MavenFallbackHash is the expected sha256 for MavenFallbackURL. Empty disables on fallback.
 	MavenFallbackHash string
+	// Disabled writes the on-disk file with a `.disabled` suffix (Prism/MultiMC
+	// disabled-mod convention). The cache entry still uses the clean filename so
+	// it stays shareable with enabled installs.
+	Disabled bool
 }
 
 type Result struct {
@@ -165,7 +169,11 @@ func downloadFileWithRetryURL(ctx context.Context, dl Download, destDir, githubT
 func downloadFile(ctx context.Context, dl Download, destDir, githubToken, cacheDir string) error {
 	safeFilename := fileutil.SanitizeFilename(dl.Filename)
 	safeModName := fileutil.SanitizeFilename(dl.ModName)
-	destPath := filepath.Join(destDir, safeFilename)
+	destName := safeFilename
+	if dl.Disabled {
+		destName += ".disabled"
+	}
+	destPath := filepath.Join(destDir, destName)
 	logging.Debugf("Verbose: download start mod=%s filename=%s url=%s\n", dl.ModName, dl.Filename, dl.URL)
 
 	// Check cache first

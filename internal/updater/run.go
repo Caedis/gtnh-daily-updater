@@ -93,7 +93,7 @@ func Run(ctx context.Context, opts Options) (*UpdateResult, error) {
 	}
 
 	needsDownload := selectDownloadChanges(changes)
-	downloads, err := resolveDownloadsForChanges(ctx, needsDownload, db, opts, extraDownloads, latestDownloads)
+	downloads, err := resolveDownloadsForChanges(ctx, needsDownload, db, opts, extraDownloads, latestDownloads, state.Mods)
 	if err != nil {
 		return nil, err
 	}
