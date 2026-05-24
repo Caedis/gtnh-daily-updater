@@ -2,10 +2,39 @@ package cmd
 
 import (
 	"errors"
+	"path/filepath"
 	"testing"
 
 	"github.com/spf13/cobra"
 )
+
+func TestExpandFlagPaths(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	instanceDir = "~/.local/share/instances/foo"
+	logFile = "~/logs/run.log"
+	cacheDir = "~/cache"
+	cacheDirAll = ".local/relative"
+	t.Cleanup(func() {
+		instanceDir, logFile, cacheDir, cacheDirAll = ".", "", "", ""
+	})
+
+	expandFlagPaths()
+
+	if want := filepath.Join(home, ".local", "share", "instances", "foo"); instanceDir != want {
+		t.Errorf("instanceDir = %q, want %q", instanceDir, want)
+	}
+	if want := filepath.Join(home, "logs", "run.log"); logFile != want {
+		t.Errorf("logFile = %q, want %q", logFile, want)
+	}
+	if want := filepath.Join(home, "cache"); cacheDir != want {
+		t.Errorf("cacheDir = %q, want %q", cacheDir, want)
+	}
+	if cacheDirAll != ".local/relative" {
+		t.Errorf("cacheDirAll = %q, want unchanged relative path", cacheDirAll)
+	}
+}
 
 func TestUsageArgsWrapsValidationErrors(t *testing.T) {
 	wrapped := usageArgs(cobra.ExactArgs(1))

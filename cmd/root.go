@@ -75,6 +75,11 @@ var rootCmd = &cobra.Command{
 			}
 		}
 
+		// Expand a leading "~" in path flags; a quoted "~/..." argument is
+		// never expanded by the shell and would otherwise be treated as a
+		// literal directory name relative to the working directory.
+		expandFlagPaths()
+
 		if logFile == "" {
 			if logsDir, err := paths.LogsDir(); err == nil {
 				logFile = filepath.Join(logsDir, time.Now().Format("2006-01-02_15-04-05")+".log")
@@ -153,6 +158,16 @@ func init() {
 	rootCmd.PersistentFlags().StringVar(&profileName, "profile", "", "Load a saved option profile by name")
 	rootCmd.PersistentFlags().BoolVarP(&verbose, "verbose", "v", false, "Enable verbose logging")
 	rootCmd.PersistentFlags().StringVar(&logFile, "log-file", "", "Write command output to a log file")
+}
+
+// expandFlagPaths expands a leading "~" in the path-valued global flags to the
+// user's home directory. Shells only expand an unquoted "~", so a quoted
+// argument like "~/.local/share" reaches the program literally.
+func expandFlagPaths() {
+	instanceDir = paths.ExpandTilde(instanceDir)
+	logFile = paths.ExpandTilde(logFile)
+	cacheDir = paths.ExpandTilde(cacheDir)
+	cacheDirAll = paths.ExpandTilde(cacheDirAll)
 }
 
 func getGithubToken() string {
