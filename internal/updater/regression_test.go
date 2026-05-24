@@ -501,6 +501,111 @@ func TestRun_GitHubDownloadFailureFallsBackToMaven(t *testing.T) {
 	}
 }
 
+func TestRun_UpdatesDisabledModKeepsDisabledSuffix(t *testing.T) {
+	instanceDir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(instanceDir, "mods"), 0o755); err != nil {
+		t.Fatalf("MkdirAll failed: %v", err)
+	}
+	const oldJar = "TestMod-1.0.0.jar.disabled"
+	if err := os.WriteFile(filepath.Join(instanceDir, "mods", oldJar), []byte("old"), 0o644); err != nil {
+		t.Fatalf("WriteFile failed: %v", err)
+	}
+
+	state := &config.LocalState{
+		Side:          "client",
+		ManifestDate:  "2026-02-19",
+		ConfigVersion: "cfg-1",
+		Mods:          map[string]config.InstalledMod{},
+	}
+	if err := state.Save(instanceDir); err != nil {
+		t.Fatalf("Save failed: %v", err)
+	}
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/GTNewHorizons/DreamAssemblerXXL/master/releases/manifests/daily.json":
+			writeJSON(t, w, map[string]any{
+				"version":       "daily",
+				"last_version":  "daily-previous",
+				"last_updated":  "2026-02-20",
+				"config":        "cfg-1",
+				"github_mods":   map[string]any{"TestMod": map[string]any{"version": "2.0.0", "side": "BOTH"}},
+				"external_mods": map[string]any{},
+			})
+		case "/GTNewHorizons/DreamAssemblerXXL/master/gtnh-assets.json":
+			writeJSON(t, w, map[string]any{
+				"config": map[string]any{"versions": []any{}},
+				"mods": []any{
+					map[string]any{
+						"name":           "TestMod",
+						"latest_version": "2.0.0",
+						"source":         "",
+						"side":           "BOTH",
+						"versions": []any{
+							map[string]any{
+								"version_tag":          "2.0.0",
+								"filename":             "TestMod-2.0.0.jar",
+								"download_url":         "https://example.test/TestMod-2.0.0.jar",
+								"browser_download_url": "https://example.test/TestMod-2.0.0.jar",
+								"prerelease":           false,
+							},
+							map[string]any{
+								"version_tag":          "1.0.0",
+								"filename":             "TestMod-1.0.0.jar",
+								"download_url":         "https://example.test/TestMod-1.0.0.jar",
+								"browser_download_url": "https://example.test/TestMod-1.0.0.jar",
+								"prerelease":           false,
+							},
+						},
+					},
+				},
+			})
+		case "/TestMod-2.0.0.jar":
+			if _, err := w.Write([]byte("new")); err != nil {
+				t.Fatalf("writing jar response: %v", err)
+			}
+		default:
+			t.Fatalf("unexpected request path: %s", r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	restoreClient := rewriteDefaultHTTPClient(t, server)
+	defer restoreClient()
+
+	result, err := Run(context.Background(), Options{
+		InstanceDir: instanceDir,
+		NoCache:     true,
+	})
+	if err != nil {
+		t.Fatalf("Run failed: %v", err)
+	}
+	if result.Updated != 1 || result.Added != 0 || result.Removed != 0 {
+		t.Fatalf("unexpected summary: %+v", result)
+	}
+
+	// Old disabled jar gone.
+	if _, err := os.Stat(filepath.Join(instanceDir, "mods", oldJar)); !os.IsNotExist(err) {
+		t.Fatalf("old disabled jar still exists, stat err=%v", err)
+	}
+	// New jar keeps the disabled suffix and never appears enabled.
+	newJar := filepath.Join(instanceDir, "mods", "TestMod-2.0.0.jar.disabled")
+	if data, err := os.ReadFile(newJar); err != nil || string(data) != "new" {
+		t.Fatalf("new disabled jar contents=%q err=%v", string(data), err)
+	}
+	if _, err := os.Stat(filepath.Join(instanceDir, "mods", "TestMod-2.0.0.jar")); !os.IsNotExist(err) {
+		t.Fatalf("enabled jar should not exist, stat err=%v", err)
+	}
+
+	updatedState, err := config.Load(instanceDir)
+	if err != nil {
+		t.Fatalf("Load failed: %v", err)
+	}
+	if got := updatedState.Mods["TestMod"]; got.Filename != "TestMod-2.0.0.jar.disabled" || got.Version != "2.0.0" {
+		t.Fatalf("unexpected tracked mod: %+v", got)
+	}
+}
+
 func TestResolveExtraMod_GitHubSourceUsesAPIURLWithToken(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/repos/owner/repo/releases/latest" {

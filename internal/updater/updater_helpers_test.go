@@ -50,6 +50,24 @@ func TestListTopLevelJarFiles(t *testing.T) {
 	}
 }
 
+func TestListTopLevelJarFilesIncludesDisabled(t *testing.T) {
+	modsDir := t.TempDir()
+	for _, fn := range []string{"on.jar", "off.jar.disabled", "note.txt", "off.txt.disabled"} {
+		if err := os.WriteFile(filepath.Join(modsDir, fn), []byte("x"), 0o644); err != nil {
+			t.Fatalf("WriteFile(%s) failed: %v", fn, err)
+		}
+	}
+
+	files, err := listTopLevelJarFiles(modsDir)
+	if err != nil {
+		t.Fatalf("listTopLevelJarFiles failed: %v", err)
+	}
+
+	if len(files) != 2 || !files["on.jar"] || !files["off.jar.disabled"] {
+		t.Fatalf("unexpected top-level jar files: %+v", files)
+	}
+}
+
 func TestScanInstalledMods(t *testing.T) {
 	modsDir := t.TempDir()
 	for _, fn := range []string{"a.jar", "b.jar", "c.jar", "dup.jar", "unmatched.jar"} {
@@ -107,6 +125,32 @@ func TestScanInstalledMods(t *testing.T) {
 	}
 }
 
+func TestScanInstalledModsDetectsDisabled(t *testing.T) {
+	modsDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(modsDir, "c.jar.disabled"), []byte("x"), 0o644); err != nil {
+		t.Fatalf("WriteFile failed: %v", err)
+	}
+
+	filenameIdx := map[string][]assets.FilenameMatch{
+		"c.jar": {
+			{ModName: "client-mod", Version: "1.0.0", Side: "CLIENT"},
+		},
+	}
+
+	mods, err := scanInstalledMods(modsDir, filenameIdx, nil, nil, "client")
+	if err != nil {
+		t.Fatalf("scanInstalledMods failed: %v", err)
+	}
+
+	got, ok := mods["client-mod"]
+	if !ok {
+		t.Fatalf("disabled mod not detected: %+v", mods)
+	}
+	if got.Version != "1.0.0" || got.Filename != "c.jar.disabled" {
+		t.Fatalf("unexpected entry: %+v", got)
+	}
+}
+
 func TestBuildVersionPattern(t *testing.T) {
 	tests := []struct {
 		filename    string
@@ -119,8 +163,8 @@ func TestBuildVersionPattern(t *testing.T) {
 			filename:    "buildcraft-7.1.55.jar",
 			version:     "7.1.55",
 			wantOk:      true,
-			wantMatch:   []string{"buildcraft-7.1.55.jar", "buildcraft-CUSTOMBUILD.jar", "buildcraft-7.1.99.jar", "BUILDCRAFT-7.1.55.jar"},
-			wantNoMatch: []string{"BuildCraftCompat-7.1.20.jar", "BuildCraftOilTweak-1.1.3.jar"},
+			wantMatch:   []string{"buildcraft-7.1.55.jar", "buildcraft-CUSTOMBUILD.jar", "buildcraft-7.1.99.jar", "BUILDCRAFT-7.1.55.jar", "buildcraft-7.1.99.jar.disabled"},
+			wantNoMatch: []string{"BuildCraftCompat-7.1.20.jar", "BuildCraftOilTweak-1.1.3.jar", "buildcraft-7.1.99.jar.bak"},
 		},
 		{
 			filename: "mod-1.0.0.jar",

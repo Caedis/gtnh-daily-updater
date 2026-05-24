@@ -208,7 +208,7 @@ func selectDownloadChanges(changes []diff.ModChange) []diff.ModChange {
 	return needsDownload
 }
 
-func resolveDownloadsForChanges(ctx context.Context, needsDownload []diff.ModChange, db *assets.AssetsDB, opts Options, extraDownloads, latestDownloads map[string]resolvedExtra) ([]downloader.Download, error) {
+func resolveDownloadsForChanges(ctx context.Context, needsDownload []diff.ModChange, db *assets.AssetsDB, opts Options, extraDownloads, latestDownloads map[string]resolvedExtra, installedMods map[string]config.InstalledMod) ([]downloader.Download, error) {
 	var downloads []downloader.Download
 	var unresolved []string
 
@@ -217,6 +217,10 @@ func resolveDownloadsForChanges(ctx context.Context, needsDownload []diff.ModCha
 		if !ok {
 			unresolved = append(unresolved, c.Name)
 			continue
+		}
+		// Preserve a manually disabled mod's `.disabled` suffix across updates.
+		if isDisabledFilename(installedMods[c.Name].Filename) {
+			dl.Disabled = true
 		}
 		downloads = append(downloads, dl)
 		logging.Debugf(
@@ -380,9 +384,14 @@ func persistUpdatedState(ctx context.Context, state *config.LocalState, changes 
 	for _, c := range changes {
 		switch c.Type {
 		case diff.Added, diff.Updated:
+			// Capture disabled state before the entry is overwritten below.
+			wasDisabled := isDisabledFilename(state.Mods[c.Name].Filename)
 			filename := ""
 			if dl, ok := resolveModDownload(ctx, db, c.Name, c.NewVersion, opts.GithubToken, extraDownloads, latestDownloads); ok {
 				filename = dl.Filename
+				if wasDisabled {
+					filename += disabledSuffix
+				}
 			}
 			state.Mods[c.Name] = config.InstalledMod{
 				Version:  c.NewVersion,
