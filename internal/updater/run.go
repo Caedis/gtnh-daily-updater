@@ -101,6 +101,11 @@ func Run(ctx context.Context, opts Options) (*UpdateResult, error) {
 	if err := ensureModsDir(modsDir, rollback); err != nil {
 		return nil, err
 	}
+	// Migrate any tracked jar whose on-disk name no longer matches the current
+	// sanitization of its canonical filename (e.g. after a sanitization-rule
+	// change). Renaming in place avoids re-downloading a duplicate. Done only on
+	// a real run — never under --dry-run, which must not touch the filesystem.
+	reconcileSanitizedFilenames(state.Mods, modsDir)
 	if err := removeOutdatedJars(changes, state.Mods, modsDir, rollback); err != nil {
 		return nil, err
 	}

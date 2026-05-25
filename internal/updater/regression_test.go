@@ -12,8 +12,95 @@ import (
 	"testing"
 
 	"github.com/caedis/gtnh-daily-updater/internal/config"
+	"github.com/caedis/gtnh-daily-updater/internal/fileutil"
 	"github.com/caedis/gtnh-daily-updater/internal/logging"
 )
+
+// TestRun_SanitizedFilenameNotRedownloaded reproduces issue #49: a mod whose
+// canonical assets-DB filename contains characters stripped by an older
+// sanitization rule was written to disk under that legacy name, but the scan
+// keyed on the raw name failed to recognize it — so every run re-downloaded it.
+// The scan must resolve the legacy on-disk jar back to its mod and report it
+// Unchanged (dry-run leaves the file untouched).
+func TestRun_SanitizedFilenameNotRedownloaded(t *testing.T) {
+	instanceDir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(instanceDir, "mods"), 0o755); err != nil {
+		t.Fatalf("MkdirAll failed: %v", err)
+	}
+
+	const rawJar = "Biomes O' Plenty-1.0.0.jar"
+	// Pick the legacy on-disk variant (apostrophe dropped, spaces hyphenated) an
+	// older release would have written.
+	var legacyJar string
+	for _, v := range fileutil.FilenameVariants(rawJar) {
+		if v != rawJar {
+			legacyJar = v
+			break
+		}
+	}
+	if legacyJar == "" {
+		t.Fatalf("test precondition: expected a legacy variant different from raw")
+	}
+	if err := os.WriteFile(filepath.Join(instanceDir, "mods", legacyJar), []byte("jar"), 0o644); err != nil {
+		t.Fatalf("WriteFile failed: %v", err)
+	}
+
+	state := &config.LocalState{
+		Side:          "client",
+		ManifestDate:  "2026-02-19",
+		ConfigVersion: "cfg-1",
+		Mods:          map[string]config.InstalledMod{},
+	}
+	if err := state.Save(instanceDir); err != nil {
+		t.Fatalf("Save failed: %v", err)
+	}
+
+	server := newUpdaterMockServer(t, mockManifestAndAssets{
+		manifest: map[string]any{
+			"version":       "daily",
+			"last_version":  "daily-previous",
+			"last_updated":  "2026-02-20",
+			"config":        "cfg-1",
+			"github_mods":   map[string]any{"BiomesOPlenty": map[string]any{"version": "1.0.0", "side": "BOTH"}},
+			"external_mods": map[string]any{},
+		},
+		assets: map[string]any{
+			"config": map[string]any{"versions": []any{}},
+			"mods": []any{
+				map[string]any{
+					"name":           "BiomesOPlenty",
+					"latest_version": "1.0.0",
+					"source":         "https://example.test/mod",
+					"side":           "BOTH",
+					"versions": []any{
+						map[string]any{
+							"version_tag":          "1.0.0",
+							"filename":             rawJar,
+							"download_url":         "https://example.test/bop.jar",
+							"browser_download_url": "https://example.test/bop.jar",
+							"prerelease":           false,
+						},
+					},
+				},
+			},
+		},
+	})
+	defer server.Close()
+
+	restoreClient := rewriteDefaultHTTPClient(t, server)
+	defer restoreClient()
+
+	result, err := Run(context.Background(), Options{
+		InstanceDir: instanceDir,
+		DryRun:      true,
+	})
+	if err != nil {
+		t.Fatalf("Run failed: %v", err)
+	}
+	if result.Added != 0 || result.Updated != 0 || result.Removed != 0 || result.Unchanged != 1 {
+		t.Fatalf("expected the sanitized jar to be recognized as unchanged, got summary: %+v", result)
+	}
+}
 
 func TestRun_DoesNotShortCircuitOnManifestTimestampWithLatest(t *testing.T) {
 	instanceDir := t.TempDir()
@@ -92,6 +179,121 @@ func TestRun_DoesNotShortCircuitOnManifestTimestampWithLatest(t *testing.T) {
 	}
 	if result.Updated != 1 || result.Added != 0 || result.Removed != 0 {
 		t.Fatalf("unexpected summary: %+v", result)
+	}
+}
+
+// TestRun_LegacyNamedJarMigratedNoDuplicate verifies that when an on-disk jar
+// carries a legacy-sanitized name, a real update migrates it (the old jar is
+// removed and the new one written under the current sanitized name) without
+// leaving a duplicate behind.
+func TestRun_LegacyNamedJarMigratedNoDuplicate(t *testing.T) {
+	instanceDir := t.TempDir()
+	modsDir := filepath.Join(instanceDir, "mods")
+	if err := os.MkdirAll(modsDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll failed: %v", err)
+	}
+
+	const rawOld = "Biomes O' Plenty-1.0.0.jar"
+	var legacyOld string
+	for _, v := range fileutil.FilenameVariants(rawOld) {
+		if v != rawOld {
+			legacyOld = v
+			break
+		}
+	}
+	if legacyOld == "" {
+		t.Fatalf("test precondition: expected a legacy variant for %q", rawOld)
+	}
+	if err := os.WriteFile(filepath.Join(modsDir, legacyOld), []byte("old"), 0o644); err != nil {
+		t.Fatalf("WriteFile failed: %v", err)
+	}
+
+	// Empty state: the scan must discover the legacy jar via the index.
+	state := &config.LocalState{
+		Side:          "client",
+		ConfigVersion: "cfg-1",
+		Mods:          map[string]config.InstalledMod{},
+	}
+	if err := state.Save(instanceDir); err != nil {
+		t.Fatalf("Save failed: %v", err)
+	}
+
+	const newJar = "Biomes O' Plenty-2.0.0.jar"
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/GTNewHorizons/DreamAssemblerXXL/master/releases/manifests/daily.json":
+			writeJSON(t, w, map[string]any{
+				"version":       "daily",
+				"last_version":  "daily-previous",
+				"last_updated":  "2026-02-20",
+				"config":        "cfg-1",
+				"github_mods":   map[string]any{"BiomesOPlenty": map[string]any{"version": "2.0.0", "side": "BOTH"}},
+				"external_mods": map[string]any{},
+			})
+		case "/GTNewHorizons/DreamAssemblerXXL/master/gtnh-assets.json":
+			writeJSON(t, w, map[string]any{
+				"config": map[string]any{"versions": []any{}},
+				"mods": []any{
+					map[string]any{
+						"name":           "BiomesOPlenty",
+						"latest_version": "2.0.0",
+						"source":         "https://example.test/mod",
+						"side":           "BOTH",
+						"versions": []any{
+							map[string]any{
+								"version_tag":          "2.0.0",
+								"filename":             newJar,
+								"download_url":         "https://example.test/bop2.jar",
+								"browser_download_url": "https://example.test/bop2.jar",
+								"prerelease":           false,
+							},
+							map[string]any{
+								"version_tag":          "1.0.0",
+								"filename":             rawOld,
+								"download_url":         "https://example.test/bop1.jar",
+								"browser_download_url": "https://example.test/bop1.jar",
+								"prerelease":           false,
+							},
+						},
+					},
+				},
+			})
+		case "/bop2.jar":
+			if _, err := w.Write([]byte("new")); err != nil {
+				t.Fatalf("writing jar: %v", err)
+			}
+		default:
+			t.Fatalf("unexpected request path: %s", r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	restoreClient := rewriteDefaultHTTPClient(t, server)
+	defer restoreClient()
+
+	result, err := Run(context.Background(), Options{InstanceDir: instanceDir, NoCache: true})
+	if err != nil {
+		t.Fatalf("Run failed: %v", err)
+	}
+	if result.Updated != 1 || result.Added != 0 || result.Removed != 0 {
+		t.Fatalf("unexpected summary: %+v", result)
+	}
+
+	// New jar present with the current sanitized name and new content.
+	if data, err := os.ReadFile(filepath.Join(modsDir, newJar)); err != nil || string(data) != "new" {
+		t.Fatalf("new jar contents=%q err=%v", string(data), err)
+	}
+	// No leftover jars: exactly one file in mods/.
+	entries, err := os.ReadDir(modsDir)
+	if err != nil {
+		t.Fatalf("ReadDir failed: %v", err)
+	}
+	if len(entries) != 1 || entries[0].Name() != newJar {
+		var names []string
+		for _, e := range entries {
+			names = append(names, e.Name())
+		}
+		t.Fatalf("expected only %q in mods dir, got %v", newJar, names)
 	}
 }
 
