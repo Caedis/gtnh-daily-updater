@@ -373,7 +373,9 @@ func snapshotAndUpdateConfigsIfNeeded(ctx context.Context, state *config.LocalSt
 	}
 
 	logging.Infoln("Updating configs...")
-	if err := gitconfigs.ApplyUpdate(ctx, gameDir, state.Side, configVersion); err != nil {
+	// state.ConfigVersion is still the previously applied version here (it is
+	// advanced to configVersion later, in persistUpdatedState).
+	if err := gitconfigs.ApplyUpdate(ctx, gameDir, state.Side, state.ConfigVersion, configVersion); err != nil {
 		return rollback(fmt.Errorf("applying config update: %w", err))
 	}
 	result.ConfigUpdated = true
