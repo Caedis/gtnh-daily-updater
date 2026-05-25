@@ -536,3 +536,80 @@ func TestResolveRemainingConflicts(t *testing.T) {
 		t.Fatalf("shared.cfg = %q, want pack-version", got)
 	}
 }
+
+func TestEnsureGitignoreCreatesAndAppends(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+	gitInit(t, dir)
+
+	// No .gitignore yet: should be created with all entries.
+	if err := ensureGitignore(ctx, dir); err != nil {
+		t.Fatalf("ensureGitignore: %v", err)
+	}
+	got, err := os.ReadFile(filepath.Join(dir, ".gitignore"))
+	if err != nil {
+		t.Fatalf("read .gitignore: %v", err)
+	}
+	for _, entry := range gitignoreEntries {
+		if !strings.Contains(string(got), entry) {
+			t.Fatalf(".gitignore missing %q, got:\n%s", entry, got)
+		}
+	}
+
+	// Pre-existing content without trailing newline: entry appended on its own line.
+	writeFile(t, filepath.Join(dir, ".gitignore"), "*.tmp")
+	if err := ensureGitignore(ctx, dir); err != nil {
+		t.Fatalf("ensureGitignore append: %v", err)
+	}
+	got, _ = os.ReadFile(filepath.Join(dir, ".gitignore"))
+	want := "*.tmp\n" + gitignoreEntries[0] + "\n"
+	if string(got) != want {
+		t.Fatalf(".gitignore = %q, want %q", got, want)
+	}
+}
+
+func TestEnsureGitignoreIdempotent(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+	gitInit(t, dir)
+
+	if err := ensureGitignore(ctx, dir); err != nil {
+		t.Fatalf("first ensureGitignore: %v", err)
+	}
+	first, _ := os.ReadFile(filepath.Join(dir, ".gitignore"))
+	if err := ensureGitignore(ctx, dir); err != nil {
+		t.Fatalf("second ensureGitignore: %v", err)
+	}
+	second, _ := os.ReadFile(filepath.Join(dir, ".gitignore"))
+	if string(first) != string(second) {
+		t.Fatalf("not idempotent: %q vs %q", first, second)
+	}
+}
+
+func TestEnsureGitignoreUntracksCommittedLog(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+	gitInit(t, dir)
+
+	// Commit the log before it is ignored.
+	writeFile(t, filepath.Join(dir, "journeymap", "journeymap.log"), "old log\n")
+	if err := runGit(ctx, dir, "add", "-A"); err != nil {
+		t.Fatal(err)
+	}
+	if err := runGit(ctx, dir, "commit", "-m", "tracked log"); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := ensureGitignore(ctx, dir); err != nil {
+		t.Fatalf("ensureGitignore: %v", err)
+	}
+
+	// Log must no longer be tracked.
+	out, err := runGitOutput(ctx, dir, "ls-files", "journeymap/journeymap.log")
+	if err != nil {
+		t.Fatalf("ls-files: %v", err)
+	}
+	if strings.TrimSpace(out) != "" {
+		t.Fatalf("journeymap.log still tracked: %q", out)
+	}
+}

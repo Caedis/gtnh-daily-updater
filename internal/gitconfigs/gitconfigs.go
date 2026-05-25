@@ -20,6 +20,11 @@ const (
 	GitUserEmail = "gtnh-daily-updater@localhost"
 )
 
+// gitignoreEntries are paths the config repo should never track (churning logs).
+var gitignoreEntries = []string{
+	"journeymap/journeymap.log",
+}
+
 // ConfigRepoDir returns the path to the git repo inside gameDir.
 func ConfigRepoDir(gameDir string) string {
 	return filepath.Join(gameDir, RepoDir)
@@ -95,6 +100,10 @@ func Init(ctx context.Context, instanceDir, gameDir, side, configVersion string)
 		return fmt.Errorf("copying configs to repo: %w", err)
 	}
 
+	if err := ensureGitignore(ctx, repoDir); err != nil {
+		return err
+	}
+
 	// Commit the local state
 	if err := runGit(ctx, repoDir, "add", "-A"); err != nil {
 		return fmt.Errorf("staging files: %w", err)
@@ -117,6 +126,10 @@ func Snapshot(ctx context.Context, gameDir, side string) error {
 
 	if err := copyTrackedItemsToRepo(gameDir, repoDir, side); err != nil {
 		return fmt.Errorf("copying configs to repo: %w", err)
+	}
+
+	if err := ensureGitignore(ctx, repoDir); err != nil {
+		return err
 	}
 
 	if err := runGit(ctx, repoDir, "add", "-A"); err != nil {
@@ -550,4 +563,44 @@ func copyTrackedItemsToRepo(gameDir, repoDir, side string) error {
 func fileExists(path string) bool {
 	_, err := os.Stat(path)
 	return err == nil
+}
+
+// ensureGitignore makes sure the repo's .gitignore lists gitignoreEntries and
+// untracks any entry already committed (so churning logs stop being snapshotted).
+func ensureGitignore(ctx context.Context, repoDir string) error {
+	path := filepath.Join(repoDir, ".gitignore")
+	existing, err := os.ReadFile(path)
+	if err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("reading .gitignore: %w", err)
+	}
+
+	lines := make(map[string]bool)
+	for l := range strings.SplitSeq(string(existing), "\n") {
+		lines[strings.TrimSpace(l)] = true
+	}
+
+	content := string(existing)
+	for _, entry := range gitignoreEntries {
+		if lines[entry] {
+			continue
+		}
+		if content != "" && !strings.HasSuffix(content, "\n") {
+			content += "\n"
+		}
+		content += entry + "\n"
+	}
+
+	if content != string(existing) {
+		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+			return fmt.Errorf("writing .gitignore: %w", err)
+		}
+	}
+
+	// Untrack entries that were committed before being ignored.
+	for _, entry := range gitignoreEntries {
+		if err := runGit(ctx, repoDir, "rm", "--cached", "--ignore-unmatch", "--", entry); err != nil {
+			return fmt.Errorf("untracking %s: %w", entry, err)
+		}
+	}
+	return nil
 }
