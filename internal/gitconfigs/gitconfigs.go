@@ -20,6 +20,11 @@ const (
 	GitUserEmail = "gtnh-daily-updater@localhost"
 )
 
+// gitignoreEntries are paths the config repo should never track (churning logs).
+var gitignoreEntries = []string{
+	"journeymap/journeymap.log",
+}
+
 // ConfigRepoDir returns the path to the git repo inside gameDir.
 func ConfigRepoDir(gameDir string) string {
 	return filepath.Join(gameDir, RepoDir)
@@ -95,6 +100,10 @@ func Init(ctx context.Context, instanceDir, gameDir, side, configVersion string)
 		return fmt.Errorf("copying configs to repo: %w", err)
 	}
 
+	if err := ensureGitignore(ctx, repoDir); err != nil {
+		return err
+	}
+
 	// Commit the local state
 	if err := runGit(ctx, repoDir, "add", "-A"); err != nil {
 		return fmt.Errorf("staging files: %w", err)
@@ -119,6 +128,10 @@ func Snapshot(ctx context.Context, gameDir, side string) error {
 		return fmt.Errorf("copying configs to repo: %w", err)
 	}
 
+	if err := ensureGitignore(ctx, repoDir); err != nil {
+		return err
+	}
+
 	if err := runGit(ctx, repoDir, "add", "-A"); err != nil {
 		return fmt.Errorf("staging files: %w", err)
 	}
@@ -133,9 +146,13 @@ func Snapshot(ctx context.Context, gameDir, side string) error {
 
 // ApplyUpdate fetches the new pack version and merges it into the local branch
 // (pack wins on genuine conflicts), then copies updated files back to the instance.
-func ApplyUpdate(ctx context.Context, gameDir, side, newConfigVersion string) error {
+//
+// prevConfigVersion is the version currently applied to the instance; it is used
+// to re-baseline repos created before real merges were adopted (see
+// ensureBaseRecorded). Pass "" to skip re-baselining.
+func ApplyUpdate(ctx context.Context, gameDir, side, prevConfigVersion, newConfigVersion string) error {
 	repoDir := ConfigRepoDir(gameDir)
-	logging.Debugf("Verbose: gitconfigs apply-update gameDir=%q side=%s newVersion=%s\n", gameDir, side, newConfigVersion)
+	logging.Debugf("Verbose: gitconfigs apply-update gameDir=%q side=%s prevVersion=%s newVersion=%s\n", gameDir, side, prevConfigVersion, newConfigVersion)
 
 	// Unshallow if the repo was previously cloned with --depth 1.
 	// A shallow repo has no common ancestor visible, causing every file to be
@@ -153,22 +170,13 @@ func ApplyUpdate(ctx context.Context, gameDir, side, newConfigVersion string) er
 		return fmt.Errorf("fetching tag %s: %w", newConfigVersion, err)
 	}
 
-	// Merge — pack wins on genuine conflicts; user changes on untouched lines are preserved
-	logging.Debugf("Verbose: gitconfigs merging %s (pack wins on genuine conflicts)\n", newConfigVersion)
-	mergeErr := runGit(ctx, repoDir, "merge", "--squash", "-X", "theirs", newConfigVersion)
-	if mergeErr != nil {
-		// `-X theirs` does not auto-resolve modify/delete conflicts. Apply the
-		// same pack-wins rule to those entries; if anything else is unmerged,
-		// surface the original error.
-		if resolveErr := resolveRemainingConflicts(ctx, repoDir); resolveErr != nil {
-			return fmt.Errorf("merging config update: %w (%v)", mergeErr, resolveErr)
-		}
-	}
+	// One-time re-baseline for repos built by the old squash merges, so this
+	// update bases off the previously applied version rather than the clone root.
+	ensureBaseRecorded(ctx, repoDir, prevConfigVersion)
 
-	logStagedDiff(ctx, repoDir)
 	msg := fmt.Sprintf("Update configs to %s", newConfigVersion)
-	if err := runGit(ctx, repoDir, "commit", "--allow-empty", "-m", msg); err != nil {
-		return fmt.Errorf("committing config update: %w", err)
+	if err := mergePackVersion(ctx, repoDir, newConfigVersion, msg); err != nil {
+		return err
 	}
 	logging.Debugf("Verbose: gitconfigs merge committed, replacing instance files\n")
 
@@ -193,6 +201,81 @@ func ApplyUpdate(ctx context.Context, gameDir, side, newConfigVersion string) er
 	logging.Debugf("Verbose: gitconfigs apply-update complete\n")
 
 	return nil
+}
+
+// mergePackVersion merges ref into the current branch (pack wins on genuine
+// conflicts) and commits the result with msg.
+//
+// This is a real merge (not --squash) on purpose. A squash merge never records
+// ref as a parent of the local branch, so the next update's merge-base falls
+// all the way back to the original clone commit. Against that frozen base, every
+// section the pack or the game has reordered since init looks like an add/add
+// (or modify/modify) delta and gets re-applied on every run — e.g. duplicated
+// config blocks that the game strips on launch, only to be re-added next update.
+// A real merge keeps ref in the ancestry so the base advances to the last
+// applied version each run, and pack-vs-local only diffs against what changed.
+//
+// --no-commit lets us resolve leftover modify/delete conflicts and log the
+// staged diff before finalizing; the follow-up commit completes the merge.
+func mergePackVersion(ctx context.Context, repoDir, ref, msg string) error {
+	logging.Debugf("Verbose: gitconfigs merging %s (pack wins on genuine conflicts)\n", ref)
+	mergeErr := runGit(ctx, repoDir, "merge", "--no-commit", "--no-ff", "-X", "theirs", ref)
+	if mergeErr != nil {
+		// `-X theirs` does not auto-resolve modify/delete conflicts. Apply the
+		// same pack-wins rule to those entries; if anything else is unmerged,
+		// surface the original error.
+		if resolveErr := resolveRemainingConflicts(ctx, repoDir); resolveErr != nil {
+			return fmt.Errorf("merging config update: %w (%v)", mergeErr, resolveErr)
+		}
+	}
+
+	logStagedDiff(ctx, repoDir)
+	// --allow-empty: an unchanged pack still records the merge so the base advances.
+	if err := runGit(ctx, repoDir, "commit", "--no-edit", "--allow-empty", "-m", msg); err != nil {
+		return fmt.Errorf("committing config update: %w", err)
+	}
+	return nil
+}
+
+// ensureBaseRecorded grafts the previously applied pack version into the local
+// branch's ancestry when it is missing, so the upcoming merge bases off that
+// version instead of the original clone commit.
+//
+// Repos created before the switch from squash to real merges have no pack tag in
+// their history (squash merges record no parent), which froze the merge-base at
+// the clone point and re-applied the pack's whole delta every run. A one-time
+// `merge -s ours` records the previous tag as a parent without changing any
+// tracked file, so the next merge sees the correct base. Repos created after the
+// switch already have the tag in history and hit the is-ancestor fast path.
+//
+// Best-effort: if the previous tag is gone upstream (pruned nightly) or anything
+// else fails, it logs and returns — the merge then falls back to the old
+// frozen-base behavior for this one run, which is no worse than before.
+func ensureBaseRecorded(ctx context.Context, repoDir, prevConfigVersion string) {
+	if prevConfigVersion == "" {
+		return
+	}
+	commitish := prevConfigVersion + "^{commit}"
+
+	// Make the previous tag's commit available locally (older runs may have GC'd it).
+	if _, err := runGitOutput(ctx, repoDir, "rev-parse", "-q", "--verify", commitish); err != nil {
+		if ferr := runGit(ctx, repoDir, "fetch", "--no-tags", "origin", "tag", prevConfigVersion); ferr != nil {
+			logging.Debugf("Verbose: gitconfigs re-baseline skipped, cannot fetch %s: %v\n", prevConfigVersion, ferr)
+			return
+		}
+	}
+
+	// Already in ancestry → real-merge repos and fresh inits land here; nothing to do.
+	if err := runGit(ctx, repoDir, "merge-base", "--is-ancestor", commitish, "HEAD"); err == nil {
+		return
+	}
+
+	logging.Debugf("Verbose: gitconfigs re-baselining: grafting %s into history (one-time)\n", prevConfigVersion)
+	msg := fmt.Sprintf("Re-baseline onto %s", prevConfigVersion)
+	// -s ours keeps our tree verbatim and only records prevConfigVersion as a parent.
+	if err := runGit(ctx, repoDir, "merge", "-s", "ours", "--no-ff", "--no-edit", "-m", msg, commitish); err != nil {
+		logging.Debugf("Verbose: gitconfigs re-baseline graft failed (continuing): %v\n", err)
+	}
 }
 
 // resolveRemainingConflicts handles conflict types left over by `merge -X theirs`
@@ -480,4 +563,44 @@ func copyTrackedItemsToRepo(gameDir, repoDir, side string) error {
 func fileExists(path string) bool {
 	_, err := os.Stat(path)
 	return err == nil
+}
+
+// ensureGitignore makes sure the repo's .gitignore lists gitignoreEntries and
+// untracks any entry already committed (so churning logs stop being snapshotted).
+func ensureGitignore(ctx context.Context, repoDir string) error {
+	path := filepath.Join(repoDir, ".gitignore")
+	existing, err := os.ReadFile(path)
+	if err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("reading .gitignore: %w", err)
+	}
+
+	lines := make(map[string]bool)
+	for l := range strings.SplitSeq(string(existing), "\n") {
+		lines[strings.TrimSpace(l)] = true
+	}
+
+	content := string(existing)
+	for _, entry := range gitignoreEntries {
+		if lines[entry] {
+			continue
+		}
+		if content != "" && !strings.HasSuffix(content, "\n") {
+			content += "\n"
+		}
+		content += entry + "\n"
+	}
+
+	if content != string(existing) {
+		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+			return fmt.Errorf("writing .gitignore: %w", err)
+		}
+	}
+
+	// Untrack entries that were committed before being ignored.
+	for _, entry := range gitignoreEntries {
+		if err := runGit(ctx, repoDir, "rm", "--cached", "--ignore-unmatch", "--", entry); err != nil {
+			return fmt.Errorf("untracking %s: %w", entry, err)
+		}
+	}
+	return nil
 }

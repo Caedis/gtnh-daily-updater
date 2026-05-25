@@ -255,6 +255,246 @@ func TestResolveBothModifiedConflicts(t *testing.T) {
 	}
 }
 
+// TestMergeAdvancesBaseNoDuplication reproduces the config-churn bug. The clone
+// point (v1) lacks a config block; the pack adds it at v2 (and leaves it
+// untouched at v3); the game reorders that block on every launch. With a squash
+// merge the base stays frozen at v1, so on the v3 update the pack's copy of the
+// block (relative to a base that lacks it) is re-added beside the player's moved
+// copy — two blocks. mergePackVersion uses a real merge, advancing the base to
+// v2, so the v3 update sees no pack change and keeps a single block.
+func TestMergeAdvancesBaseNoDuplication(t *testing.T) {
+	if !IsGitAvailable() {
+		t.Skip("git not available")
+	}
+	ctx := context.Background()
+	dir := t.TempDir()
+	gitInit(t, dir)
+
+	cfg := filepath.Join(dir, "config", "Client.cfg")
+	noBlock := "header\n\ntail=on\n"                            // v1: clone point, no block
+	packBlock := "header\n\nblock {\n    val=1\n}\n\ntail=on\n" // v2/v3: pack adds block
+	gameForm := "block {\n    val=1\n}\n\nheader\n\ntail=on\n"  // game reorders block to top
+
+	// v1: clone point without the block.
+	writeFile(t, cfg, noBlock)
+	if err := runGit(ctx, dir, "add", "-A"); err != nil {
+		t.Fatal(err)
+	}
+	if err := runGit(ctx, dir, "commit", "-m", "pack v1"); err != nil {
+		t.Fatal(err)
+	}
+	if err := runGit(ctx, dir, "tag", "v1"); err != nil {
+		t.Fatal(err)
+	}
+
+	// v2: pack introduces the block. v3: pack leaves it untouched.
+	writeFile(t, cfg, packBlock)
+	if err := runGit(ctx, dir, "add", "-A"); err != nil {
+		t.Fatal(err)
+	}
+	if err := runGit(ctx, dir, "commit", "-m", "pack v2 adds block"); err != nil {
+		t.Fatal(err)
+	}
+	if err := runGit(ctx, dir, "tag", "v2"); err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, filepath.Join(dir, "config", "other.cfg"), "v3\n") // unrelated change so v3 differs
+	if err := runGit(ctx, dir, "add", "-A"); err != nil {
+		t.Fatal(err)
+	}
+	if err := runGit(ctx, dir, "commit", "-m", "pack v3"); err != nil {
+		t.Fatal(err)
+	}
+	if err := runGit(ctx, dir, "tag", "v3"); err != nil {
+		t.Fatal(err)
+	}
+
+	// local branch starts at the clone point (v1).
+	if err := runGit(ctx, dir, "checkout", "-b", "local", "v1"); err != nil {
+		t.Fatal(err)
+	}
+
+	blockCount := func() int {
+		t.Helper()
+		b, err := os.ReadFile(cfg)
+		if err != nil {
+			t.Fatalf("read cfg: %v", err)
+		}
+		return strings.Count(string(b), "block {")
+	}
+	gameRewriteAndSnapshot := func() {
+		t.Helper()
+		writeFile(t, cfg, gameForm)
+		if err := runGit(ctx, dir, "add", "-A"); err != nil {
+			t.Fatal(err)
+		}
+		if err := runGit(ctx, dir, "commit", "-m", "Snapshot player changes"); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// Round 1: update to v2 (pack adds the block), then the game reorders it.
+	if err := mergePackVersion(ctx, dir, "v2", "Update configs to v2"); err != nil {
+		t.Fatalf("merge v2: %v", err)
+	}
+	if n := blockCount(); n != 1 {
+		t.Fatalf("after v2 update: block count = %d, want 1", n)
+	}
+	gameRewriteAndSnapshot()
+
+	// Round 2: update to v3. Pack never touched Client.cfg since v2. A frozen
+	// base (v1, no block) would re-add the pack's block beside the player's
+	// reordered one (count 2); a real merge advances the base to v2 (count 1).
+	if err := mergePackVersion(ctx, dir, "v3", "Update configs to v3"); err != nil {
+		t.Fatalf("merge v3: %v", err)
+	}
+	if n := blockCount(); n != 1 {
+		t.Fatalf("after v3 update: block count = %d, want 1 (duplication regression)", n)
+	}
+
+	// The merge-base must have advanced past the clone point (v1) to v3.
+	base, err := runGitOutput(ctx, dir, "merge-base", "local", "v3")
+	if err != nil {
+		t.Fatal(err)
+	}
+	v3, err := runGitOutput(ctx, dir, "rev-parse", "v3^{commit}")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.TrimSpace(base) != strings.TrimSpace(v3) {
+		t.Fatalf("merge-base = %s, want v3 %s (base did not advance)", strings.TrimSpace(base), strings.TrimSpace(v3))
+	}
+}
+
+// TestEnsureBaseRecordedRebaselinesSquashRepo simulates an existing repo built
+// by the old squash merges (no pack tag in its ancestry, base frozen at the
+// clone root). ensureBaseRecorded should graft the previously applied tag into
+// history so the next real merge bases off it — yielding a single block instead
+// of the duplicate the frozen base would produce.
+func TestEnsureBaseRecordedRebaselinesSquashRepo(t *testing.T) {
+	if !IsGitAvailable() {
+		t.Skip("git not available")
+	}
+	ctx := context.Background()
+	dir := t.TempDir()
+	gitInit(t, dir)
+
+	cfg := filepath.Join(dir, "config", "Client.cfg")
+	noBlock := "header\n\ntail=on\n"
+	packBlock := "header\n\nblock {\n    val=1\n}\n\ntail=on\n"
+	gameForm := "block {\n    val=1\n}\n\nheader\n\ntail=on\n"
+
+	commit := func(msg string) {
+		t.Helper()
+		if err := runGit(ctx, dir, "add", "-A"); err != nil {
+			t.Fatal(err)
+		}
+		if err := runGit(ctx, dir, "commit", "-m", msg); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	writeFile(t, cfg, noBlock)
+	commit("pack v1")
+	if err := runGit(ctx, dir, "tag", "v1"); err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, cfg, packBlock)
+	commit("pack v2 adds block")
+	if err := runGit(ctx, dir, "tag", "v2"); err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, filepath.Join(dir, "config", "other.cfg"), "v3\n")
+	commit("pack v3")
+	if err := runGit(ctx, dir, "tag", "v3"); err != nil {
+		t.Fatal(err)
+	}
+
+	// local built by the OLD squash path: branch at v1, squash-merge v2 (records
+	// no parent), then the game reorders the block and we snapshot.
+	if err := runGit(ctx, dir, "checkout", "-b", "local", "v1"); err != nil {
+		t.Fatal(err)
+	}
+	if err := runGit(ctx, dir, "merge", "--squash", "-X", "theirs", "v2"); err != nil {
+		t.Fatal(err)
+	}
+	commit("Update configs to v2")
+	writeFile(t, cfg, gameForm)
+	commit("Snapshot player changes")
+
+	// Sanity: v2 is NOT yet in local's ancestry (squash recorded no parent).
+	if err := runGit(ctx, dir, "merge-base", "--is-ancestor", "v2^{commit}", "HEAD"); err == nil {
+		t.Fatal("precondition failed: v2 should not be an ancestor of squash-built local")
+	}
+
+	// Re-baseline, then apply the v3 update the normal (real-merge) way.
+	ensureBaseRecorded(ctx, dir, "v2")
+	if err := mergePackVersion(ctx, dir, "v3", "Update configs to v3"); err != nil {
+		t.Fatalf("merge v3: %v", err)
+	}
+
+	b, err := os.ReadFile(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n := strings.Count(string(b), "block {"); n != 1 {
+		t.Fatalf("after re-baseline + v3 update: block count = %d, want 1", n)
+	}
+
+	// Base must now reach v3 (via the grafted v2), not the clone root.
+	base, err := runGitOutput(ctx, dir, "merge-base", "local", "v3")
+	if err != nil {
+		t.Fatal(err)
+	}
+	v3, err := runGitOutput(ctx, dir, "rev-parse", "v3^{commit}")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.TrimSpace(base) != strings.TrimSpace(v3) {
+		t.Fatalf("merge-base = %s, want v3 %s", strings.TrimSpace(base), strings.TrimSpace(v3))
+	}
+}
+
+// TestEnsureBaseRecordedNoopWhenAncestor verifies the fast path: when the
+// previous tag is already in the local branch's history (repos created after the
+// switch to real merges), ensureBaseRecorded creates no graft commit.
+func TestEnsureBaseRecordedNoopWhenAncestor(t *testing.T) {
+	if !IsGitAvailable() {
+		t.Skip("git not available")
+	}
+	ctx := context.Background()
+	dir := t.TempDir()
+	gitInit(t, dir)
+
+	writeFile(t, filepath.Join(dir, "config", "a.cfg"), "x\n")
+	if err := runGit(ctx, dir, "add", "-A"); err != nil {
+		t.Fatal(err)
+	}
+	if err := runGit(ctx, dir, "commit", "-m", "v1"); err != nil {
+		t.Fatal(err)
+	}
+	if err := runGit(ctx, dir, "tag", "v1"); err != nil {
+		t.Fatal(err)
+	}
+	if err := runGit(ctx, dir, "checkout", "-b", "local"); err != nil {
+		t.Fatal(err)
+	}
+
+	before, err := runGitOutput(ctx, dir, "rev-parse", "HEAD")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// v1 is an ancestor of local → must be a no-op.
+	ensureBaseRecorded(ctx, dir, "v1")
+	after, err := runGitOutput(ctx, dir, "rev-parse", "HEAD")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.TrimSpace(before) != strings.TrimSpace(after) {
+		t.Fatalf("ensureBaseRecorded created a commit on the fast path: %s -> %s", before, after)
+	}
+}
+
 func TestResolveRemainingConflicts(t *testing.T) {
 	if !IsGitAvailable() {
 		t.Skip("git not available")
@@ -294,5 +534,82 @@ func TestResolveRemainingConflicts(t *testing.T) {
 	}
 	if strings.TrimSpace(string(got)) != "pack-version" {
 		t.Fatalf("shared.cfg = %q, want pack-version", got)
+	}
+}
+
+func TestEnsureGitignoreCreatesAndAppends(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+	gitInit(t, dir)
+
+	// No .gitignore yet: should be created with all entries.
+	if err := ensureGitignore(ctx, dir); err != nil {
+		t.Fatalf("ensureGitignore: %v", err)
+	}
+	got, err := os.ReadFile(filepath.Join(dir, ".gitignore"))
+	if err != nil {
+		t.Fatalf("read .gitignore: %v", err)
+	}
+	for _, entry := range gitignoreEntries {
+		if !strings.Contains(string(got), entry) {
+			t.Fatalf(".gitignore missing %q, got:\n%s", entry, got)
+		}
+	}
+
+	// Pre-existing content without trailing newline: entry appended on its own line.
+	writeFile(t, filepath.Join(dir, ".gitignore"), "*.tmp")
+	if err := ensureGitignore(ctx, dir); err != nil {
+		t.Fatalf("ensureGitignore append: %v", err)
+	}
+	got, _ = os.ReadFile(filepath.Join(dir, ".gitignore"))
+	want := "*.tmp\n" + gitignoreEntries[0] + "\n"
+	if string(got) != want {
+		t.Fatalf(".gitignore = %q, want %q", got, want)
+	}
+}
+
+func TestEnsureGitignoreIdempotent(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+	gitInit(t, dir)
+
+	if err := ensureGitignore(ctx, dir); err != nil {
+		t.Fatalf("first ensureGitignore: %v", err)
+	}
+	first, _ := os.ReadFile(filepath.Join(dir, ".gitignore"))
+	if err := ensureGitignore(ctx, dir); err != nil {
+		t.Fatalf("second ensureGitignore: %v", err)
+	}
+	second, _ := os.ReadFile(filepath.Join(dir, ".gitignore"))
+	if string(first) != string(second) {
+		t.Fatalf("not idempotent: %q vs %q", first, second)
+	}
+}
+
+func TestEnsureGitignoreUntracksCommittedLog(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+	gitInit(t, dir)
+
+	// Commit the log before it is ignored.
+	writeFile(t, filepath.Join(dir, "journeymap", "journeymap.log"), "old log\n")
+	if err := runGit(ctx, dir, "add", "-A"); err != nil {
+		t.Fatal(err)
+	}
+	if err := runGit(ctx, dir, "commit", "-m", "tracked log"); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := ensureGitignore(ctx, dir); err != nil {
+		t.Fatalf("ensureGitignore: %v", err)
+	}
+
+	// Log must no longer be tracked.
+	out, err := runGitOutput(ctx, dir, "ls-files", "journeymap/journeymap.log")
+	if err != nil {
+		t.Fatalf("ls-files: %v", err)
+	}
+	if strings.TrimSpace(out) != "" {
+		t.Fatalf("journeymap.log still tracked: %q", out)
 	}
 }
