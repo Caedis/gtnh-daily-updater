@@ -11,6 +11,7 @@ import (
 
 	"github.com/caedis/gtnh-daily-updater/internal/assets"
 	"github.com/caedis/gtnh-daily-updater/internal/config"
+	"github.com/caedis/gtnh-daily-updater/internal/fileutil"
 	"github.com/caedis/gtnh-daily-updater/internal/logging"
 	"github.com/caedis/gtnh-daily-updater/internal/manifest"
 	"github.com/caedis/gtnh-daily-updater/internal/side"
@@ -66,9 +67,10 @@ func scanInstalledMods(modsDir string, filenameIdx map[string][]assets.FilenameM
 		}
 
 		mods[match.ModName] = config.InstalledMod{
-			Version:  match.Version,
-			Filename: fn,
-			Side:     modSide,
+			Version:     match.Version,
+			Filename:    fn,
+			RawFilename: match.RawFilename,
+			Side:        modSide,
 		}
 		logging.Debugf("Verbose: scanned mod %s version=%s filename=%s side=%s\n", match.ModName, match.Version, fn, modSide)
 
@@ -135,6 +137,33 @@ func buildVersionPattern(filename, version string) (*regexp.Regexp, bool) {
 	return regexp.MustCompile(`(?i)^` + patStr + `(?:` + regexp.QuoteMeta(disabledSuffix) + `)?$`), true
 }
 
+// versionPatternsForFilename builds version-wildcard patterns for both the raw
+// filename and its sanitized on-disk form. Duplicate patterns (when the
+// filename needs no sanitization) are collapsed.
+func versionPatternsForFilename(filename, version string) []*regexp.Regexp {
+	var patterns []*regexp.Regexp
+	seen := make(map[string]bool)
+	for _, fn := range []string{filename, fileutil.SanitizeFilename(filename)} {
+		pat, ok := buildVersionPattern(fn, version)
+		if !ok || seen[pat.String()] {
+			continue
+		}
+		seen[pat.String()] = true
+		patterns = append(patterns, pat)
+	}
+	return patterns
+}
+
+// matchesAny reports whether s matches any of the patterns.
+func matchesAny(patterns []*regexp.Regexp, s string) bool {
+	for _, pat := range patterns {
+		if pat.MatchString(s) {
+			return true
+		}
+	}
+	return false
+}
+
 // detectStaleJars finds disk jars that belong to manifest mods not yet present
 // in scannedMods. It compares each unresolved mod's expected filename pattern
 // against unclaimed jars. Mods are processed in reverse alphabetical order so
@@ -180,22 +209,26 @@ func detectStaleJars(
 		if !ok {
 			continue
 		}
-		pat, ok := buildVersionPattern(filename, info.Version)
-		if !ok {
+		// Match both the canonical filename and its sanitized on-disk form, so a
+		// jar this tool wrote with a cross-OS-safe name is still recognized as
+		// stale (and later removed/replaced) rather than left orphaned.
+		patterns := versionPatternsForFilename(filename, info.Version)
+		if len(patterns) == 0 {
 			continue
 		}
 		for _, jar := range jarList {
 			if claimedJars[jar] {
 				continue
 			}
-			if pat.MatchString(jar) {
+			if matchesAny(patterns, jar) {
 				result[modName] = config.InstalledMod{
-					Version:  "",
-					Filename: jar,
-					Side:     info.Side,
+					Version:     "",
+					Filename:    jar,
+					RawFilename: filename,
+					Side:        info.Side,
 				}
 				claimedJars[jar] = true
-				logging.Debugf("Verbose: stale jar detected mod=%s pattern=%s matched=%s\n", modName, pat.String(), jar)
+				logging.Debugf("Verbose: stale jar detected mod=%s raw=%s matched=%s\n", modName, filename, jar)
 				break
 			}
 		}

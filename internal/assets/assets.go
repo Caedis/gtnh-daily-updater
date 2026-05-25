@@ -9,6 +9,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/caedis/gtnh-daily-updater/internal/fileutil"
 	"github.com/caedis/gtnh-daily-updater/internal/maven"
 	"github.com/caedis/gtnh-daily-updater/internal/semver"
 )
@@ -167,29 +168,49 @@ type FilenameMatch struct {
 	ModName string
 	Version string
 	Side    string
+	// RawFilename is the canonical assets-DB filename this match was indexed
+	// under, before any cross-OS sanitization. Recording it lets the updater
+	// recompute the expected on-disk name if the sanitization rules change,
+	// renaming an existing jar instead of re-downloading a duplicate.
+	RawFilename string
 }
 
 // BuildFilenameIndex creates a reverse index from jar filename to mod name + version.
 // For duplicate filenames, all matches are returned. For GTNH-hosted mods (Source == ""),
 // Maven-style filenames (ModName-Version.jar) are also indexed.
+//
+// Each raw filename is additionally indexed under its sanitized form (see
+// fileutil.SanitizeFilename) so that a jar written to disk with a cross-OS-safe
+// name still resolves back to its mod on the next scan. The match's RawFilename
+// always carries the canonical (pre-sanitization) name.
 func (db *AssetsDB) BuildFilenameIndex() map[string][]FilenameMatch {
 	idx := make(map[string][]FilenameMatch)
+	add := func(rawName string, mod AssetEntry, v VersionAsset) {
+		if rawName == "" {
+			return
+		}
+		match := FilenameMatch{
+			ModName:     mod.Name,
+			Version:     v.VersionTag,
+			Side:        mod.Side,
+			RawFilename: rawName,
+		}
+		// Index under every name this jar may carry on disk (raw, current
+		// sanitized form, and legacy sanitized forms) so a file written by any
+		// past sanitization rule still resolves back to its mod.
+		for _, key := range fileutil.FilenameVariants(rawName) {
+			idx[key] = append(idx[key], match)
+		}
+	}
 	for _, mod := range db.Mods {
 		isGTNH := mod.Source == ""
 		for _, v := range mod.Versions {
-			match := FilenameMatch{
-				ModName: mod.Name,
-				Version: v.VersionTag,
-				Side:    mod.Side,
-			}
-			if v.Filename != "" {
-				idx[v.Filename] = append(idx[v.Filename], match)
-			}
+			add(v.Filename, mod, v)
 			// Also index the Maven-style filename for GTNH-hosted mods
 			if isGTNH {
 				mavenFn := maven.MavenFilename(mod.Name, v.VersionTag)
 				if mavenFn != v.Filename {
-					idx[mavenFn] = append(idx[mavenFn], match)
+					add(mavenFn, mod, v)
 				}
 			}
 		}

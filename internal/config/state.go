@@ -31,6 +31,13 @@ type InstalledMod struct {
 	Version  string `json:"version"`
 	Filename string `json:"filename"`
 	Side     string `json:"side"`
+	// RawFilename is the canonical assets-DB filename, before cross-OS
+	// sanitization. Filename holds the actual on-disk name (which may be the
+	// sanitized form). Persisting both lets the updater migrate an existing jar
+	// when the sanitization rules change, instead of treating it as missing and
+	// re-downloading a duplicate. Empty for jars with no known canonical name
+	// (e.g. user-added or pre-migration state).
+	RawFilename string `json:"raw_filename,omitempty"`
 }
 
 // Load reads the local state from the instance directory.

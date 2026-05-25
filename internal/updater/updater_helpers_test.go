@@ -7,6 +7,7 @@ import (
 
 	"github.com/caedis/gtnh-daily-updater/internal/assets"
 	"github.com/caedis/gtnh-daily-updater/internal/config"
+	"github.com/caedis/gtnh-daily-updater/internal/fileutil"
 	"github.com/caedis/gtnh-daily-updater/internal/manifest"
 )
 
@@ -304,6 +305,80 @@ func TestDetectStaleJarsAlreadyScanned(t *testing.T) {
 	result := detectStaleJars(manifestMods, scannedMods, diskJars, db)
 	if len(result) != 0 {
 		t.Errorf("expected no stale jars when mod already scanned, got %+v", result)
+	}
+}
+
+func TestReconcileSanitizedFilenames(t *testing.T) {
+	modsDir := t.TempDir()
+	// Canonical name is clean under the current rule, but an older release wrote
+	// the jar under a legacy-sanitized name (apostrophe dropped, spaces ->'-').
+	const rawJar = "Carpenter's Blocks v3.3.8.2.jar"
+	want := fileutil.SanitizeFilename(rawJar)
+	var legacyJar string
+	for _, v := range fileutil.FilenameVariants(rawJar) {
+		if v != want {
+			legacyJar = v
+			break
+		}
+	}
+	if legacyJar == "" {
+		t.Fatalf("test precondition: expected a legacy variant different from current sanitized form")
+	}
+	if err := os.WriteFile(filepath.Join(modsDir, legacyJar), []byte("jar"), 0o644); err != nil {
+		t.Fatalf("WriteFile failed: %v", err)
+	}
+
+	mods := map[string]config.InstalledMod{
+		"Carpenters Blocks": {
+			Version:     "3.3.8.2",
+			Filename:    legacyJar, // recorded as the legacy on-disk name
+			RawFilename: rawJar,
+			Side:        "BOTH",
+		},
+	}
+
+	reconcileSanitizedFilenames(mods, modsDir)
+
+	// Disk file renamed to the current sanitized form...
+	if _, err := os.Stat(filepath.Join(modsDir, want)); err != nil {
+		t.Fatalf("expected renamed jar %q on disk: %v", want, err)
+	}
+	if _, err := os.Stat(filepath.Join(modsDir, legacyJar)); !os.IsNotExist(err) {
+		t.Fatalf("legacy jar should have been renamed away, stat err=%v", err)
+	}
+	// ...and the in-memory entry updated to match.
+	if got := mods["Carpenters Blocks"].Filename; got != want {
+		t.Fatalf("Filename=%q, want %q", got, want)
+	}
+}
+
+func TestReconcileSanitizedFilenamesSkipsStaleAndClean(t *testing.T) {
+	modsDir := t.TempDir()
+	const cleanJar = "lwjgl3ify-2.1.5.jar"   // needs no sanitization
+	const staleJar = "buildcraft-CUSTOM.jar" // stale placeholder (Version == "")
+	for _, fn := range []string{cleanJar, staleJar} {
+		if err := os.WriteFile(filepath.Join(modsDir, fn), []byte("jar"), 0o644); err != nil {
+			t.Fatalf("WriteFile(%s) failed: %v", fn, err)
+		}
+	}
+
+	mods := map[string]config.InstalledMod{
+		"lwjgl3ify": {Version: "2.1.5", Filename: cleanJar, RawFilename: cleanJar, Side: "BOTH"},
+		// Stale entry: Version empty, canonical name differs from on-disk jar.
+		"buildcraft": {Version: "", Filename: staleJar, RawFilename: "buildcraft-7.1.55.jar", Side: "BOTH"},
+	}
+
+	reconcileSanitizedFilenames(mods, modsDir)
+
+	// Both files left untouched: clean needs no rename, stale must not be renamed
+	// onto the canonical name (it is slated for removal/replacement).
+	for _, fn := range []string{cleanJar, staleJar} {
+		if _, err := os.Stat(filepath.Join(modsDir, fn)); err != nil {
+			t.Fatalf("expected %q untouched on disk: %v", fn, err)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(modsDir, "buildcraft-7.1.55.jar")); !os.IsNotExist(err) {
+		t.Fatalf("stale jar must not be renamed to canonical name, stat err=%v", err)
 	}
 }
 

@@ -14,6 +14,7 @@ import (
 	"github.com/caedis/gtnh-daily-updater/internal/config"
 	"github.com/caedis/gtnh-daily-updater/internal/diff"
 	"github.com/caedis/gtnh-daily-updater/internal/downloader"
+	"github.com/caedis/gtnh-daily-updater/internal/fileutil"
 	"github.com/caedis/gtnh-daily-updater/internal/gitconfigs"
 	"github.com/caedis/gtnh-daily-updater/internal/logging"
 	"github.com/caedis/gtnh-daily-updater/internal/lwjgl3ify"
@@ -166,6 +167,41 @@ func refreshTrackedMods(state *config.LocalState, db *assets.AssetsDB, m *manife
 	state.Mods = scannedMods
 	logging.Debugf("Verbose: scanned installed mods=%d\n", len(scannedMods))
 	return nil
+}
+
+// reconcileSanitizedFilenames renames on-disk jars whose recorded on-disk name
+// no longer matches the current sanitization of their canonical (RawFilename)
+// name, updating the in-memory entry to the new name. Stale entries (Version
+// == "") are skipped — they are placeholders slated for removal/replacement,
+// not for renaming. Renames that would clobber an existing file are skipped.
+func reconcileSanitizedFilenames(mods map[string]config.InstalledMod, modsDir string) {
+	for name, installed := range mods {
+		if installed.RawFilename == "" || installed.Filename == "" || installed.Version == "" {
+			continue
+		}
+		want := fileutil.SanitizeFilename(installed.RawFilename)
+		if isDisabledFilename(installed.Filename) {
+			want += disabledSuffix
+		}
+		if want == installed.Filename {
+			continue
+		}
+		oldPath := filepath.Join(modsDir, installed.Filename)
+		newPath := filepath.Join(modsDir, want)
+		if _, err := os.Stat(oldPath); err != nil {
+			continue // nothing on disk to rename
+		}
+		if _, err := os.Stat(newPath); err == nil {
+			continue // destination exists; don't clobber
+		}
+		if err := os.Rename(oldPath, newPath); err != nil {
+			logging.Debugf("Verbose: filename reconcile failed mod=%s %s->%s: %v\n", name, installed.Filename, want, err)
+			continue
+		}
+		logging.Debugf("Verbose: reconciled filename mod=%s %s->%s\n", name, installed.Filename, want)
+		installed.Filename = want
+		mods[name] = installed
+	}
 }
 
 func resolveConfiguredExtras(ctx context.Context, state *config.LocalState, db *assets.AssetsDB, opts Options) (map[string]diff.ResolvedExtraMod, map[string]resolvedExtra, error) {
@@ -389,16 +425,22 @@ func persistUpdatedState(ctx context.Context, state *config.LocalState, changes 
 			// Capture disabled state before the entry is overwritten below.
 			wasDisabled := isDisabledFilename(state.Mods[c.Name].Filename)
 			filename := ""
+			rawFilename := ""
 			if dl, ok := resolveModDownload(ctx, db, c.Name, c.NewVersion, opts.GithubToken, extraDownloads, latestDownloads); ok {
-				filename = dl.Filename
+				// Record both names: RawFilename is the canonical assets-DB name,
+				// Filename is the sanitized form actually written to disk by the
+				// downloader. They must agree or the next scan re-downloads.
+				rawFilename = dl.Filename
+				filename = fileutil.SanitizeFilename(dl.Filename)
 				if wasDisabled {
 					filename += disabledSuffix
 				}
 			}
 			state.Mods[c.Name] = config.InstalledMod{
-				Version:  c.NewVersion,
-				Filename: filename,
-				Side:     c.Side,
+				Version:     c.NewVersion,
+				Filename:    filename,
+				RawFilename: rawFilename,
+				Side:        c.Side,
 			}
 		case diff.Removed:
 			delete(state.Mods, c.Name)
