@@ -613,3 +613,83 @@ func TestEnsureGitignoreUntracksCommittedLog(t *testing.T) {
 		t.Fatalf("journeymap.log still tracked: %q", out)
 	}
 }
+
+// TestFetchForceUpdatesMovedUpstreamTag guards the nightly-tag mutation case:
+// GTNH re-points nightly tags upstream; without --force, `git fetch` keeps the
+// stale local ref, the next merge says "Already up to date", and the real pack
+// changes are silently skipped. This reproduces an upstream re-tag and asserts
+// the fetch line ApplyUpdate uses moves the local tag to the new commit.
+func TestFetchForceUpdatesMovedUpstreamTag(t *testing.T) {
+	if !IsGitAvailable() {
+		t.Skip("git not available")
+	}
+	ctx := context.Background()
+
+	// Upstream: commit A tagged T, then commit B (T not yet moved).
+	upstream := t.TempDir()
+	gitInit(t, upstream)
+	writeFile(t, filepath.Join(upstream, "f"), "A\n")
+	if err := runGit(ctx, upstream, "add", "-A"); err != nil {
+		t.Fatal(err)
+	}
+	if err := runGit(ctx, upstream, "commit", "-m", "A"); err != nil {
+		t.Fatal(err)
+	}
+	if err := runGit(ctx, upstream, "tag", "T"); err != nil {
+		t.Fatal(err)
+	}
+	commitA, err := runGitOutput(ctx, upstream, "rev-parse", "T^{commit}")
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, filepath.Join(upstream, "f"), "B\n")
+	if err := runGit(ctx, upstream, "add", "-A"); err != nil {
+		t.Fatal(err)
+	}
+	if err := runGit(ctx, upstream, "commit", "-m", "B"); err != nil {
+		t.Fatal(err)
+	}
+	commitB, err := runGitOutput(ctx, upstream, "rev-parse", "HEAD"); if err != nil {
+		t.Fatal(err)
+	}
+
+	// Local clones upstream, pinning tag T at commit A.
+	local := t.TempDir()
+	if err := runGit(ctx, local, "clone", upstream, "."); err != nil {
+		t.Fatalf("clone: %v", err)
+	}
+	if err := runGit(ctx, local, "config", "user.name", "test"); err != nil {
+		t.Fatal(err)
+	}
+	if err := runGit(ctx, local, "config", "user.email", "test@example.com"); err != nil {
+		t.Fatal(err)
+	}
+	if err := runGit(ctx, local, "config", "commit.gpgsign", "false"); err != nil {
+		t.Fatal(err)
+	}
+	localT, err := runGitOutput(ctx, local, "rev-parse", "T^{commit}")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.TrimSpace(localT) != strings.TrimSpace(commitA) {
+		t.Fatalf("setup: local T = %s, want A %s", strings.TrimSpace(localT), strings.TrimSpace(commitA))
+	}
+
+	// Upstream re-points T to commit B (mutable nightly tag).
+	if err := runGit(ctx, upstream, "tag", "-f", "T", strings.TrimSpace(commitB)); err != nil {
+		t.Fatalf("retag upstream: %v", err)
+	}
+
+	// Run the exact fetch line ApplyUpdate uses. Must update local T to B.
+	if err := runGit(ctx, local, "fetch", "--force", "--no-tags", "origin", "tag", "T"); err != nil {
+		t.Fatalf("fetch: %v", err)
+	}
+
+	got, err := runGitOutput(ctx, local, "rev-parse", "T^{commit}")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.TrimSpace(got) != strings.TrimSpace(commitB) {
+		t.Fatalf("after force-fetch: local T = %s, want B %s (stale tag, real pack changes would be skipped)", strings.TrimSpace(got), strings.TrimSpace(commitB))
+	}
+}

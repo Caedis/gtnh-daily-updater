@@ -165,8 +165,10 @@ func ApplyUpdate(ctx context.Context, gameDir, side, prevConfigVersion, newConfi
 		}
 	}
 
-	// Fetch the new tag
-	if err := runGit(ctx, repoDir, "fetch", "--no-tags", "origin", "tag", newConfigVersion); err != nil {
+	// Fetch the new tag. --force so an upstream re-tag (GTNH nightly tags are
+	// mutable) overwrites the local ref instead of silently staying stale, which
+	// would make the merge a no-op and skip the real pack changes.
+	if err := runGit(ctx, repoDir, "fetch", "--force", "--no-tags", "origin", "tag", newConfigVersion); err != nil {
 		return fmt.Errorf("fetching tag %s: %w", newConfigVersion, err)
 	}
 
@@ -259,7 +261,7 @@ func ensureBaseRecorded(ctx context.Context, repoDir, prevConfigVersion string) 
 
 	// Make the previous tag's commit available locally (older runs may have GC'd it).
 	if _, err := runGitOutput(ctx, repoDir, "rev-parse", "-q", "--verify", commitish); err != nil {
-		if ferr := runGit(ctx, repoDir, "fetch", "--no-tags", "origin", "tag", prevConfigVersion); ferr != nil {
+		if ferr := runGit(ctx, repoDir, "fetch", "--force", "--no-tags", "origin", "tag", prevConfigVersion); ferr != nil {
 			logging.Debugf("Verbose: gitconfigs re-baseline skipped, cannot fetch %s: %v\n", prevConfigVersion, ferr)
 			return
 		}
