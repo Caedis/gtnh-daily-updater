@@ -13,7 +13,9 @@ import (
 
 	"github.com/caedis/gtnh-daily-updater/internal/config"
 	"github.com/caedis/gtnh-daily-updater/internal/fileutil"
+	"github.com/caedis/gtnh-daily-updater/internal/github"
 	"github.com/caedis/gtnh-daily-updater/internal/logging"
+	"github.com/caedis/gtnh-daily-updater/internal/maven"
 )
 
 // TestRun_SanitizedFilenameNotRedownloaded reproduces issue #49: a mod whose
@@ -1032,4 +1034,394 @@ func (t *updaterRewriteHostTransport) RoundTrip(req *http.Request) (*http.Respon
 	cloned.URL.Scheme = "http"
 	cloned.URL.Host = t.host
 	return t.rt.RoundTrip(cloned)
+}
+
+// rewriteAllHTTPClients points the default client AND the github/maven
+// package-level clients at the test server, so FetchLatestRelease and Maven
+// metadata lookups (which capture their own client at init) are also rewritten.
+func rewriteAllHTTPClients(t *testing.T, server *httptest.Server) func() {
+	t.Helper()
+	parsed, err := url.Parse(server.URL)
+	if err != nil {
+		t.Fatalf("url.Parse failed: %v", err)
+	}
+
+	client := &http.Client{
+		Transport: &updaterRewriteHostTransport{
+			host: parsed.Host,
+			rt:   server.Client().Transport,
+		},
+	}
+
+	oldDefault := http.DefaultClient
+	http.DefaultClient = client
+	oldGitHub := github.SetHTTPClient(client)
+	oldMaven := maven.HTTPClient
+	maven.HTTPClient = client
+
+	return func() {
+		http.DefaultClient = oldDefault
+		github.SetHTTPClient(oldGitHub)
+		maven.HTTPClient = oldMaven
+	}
+}
+
+func TestResolveLatest_GitHubPreferredOverMavenNoToken(t *testing.T) {
+	instanceDir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(instanceDir, "mods"), 0o755); err != nil {
+		t.Fatalf("MkdirAll failed: %v", err)
+	}
+	state := &config.LocalState{
+		Side:          "client",
+		ManifestDate:  "2026-02-19",
+		ConfigVersion: "cfg-1",
+		Mods:          map[string]config.InstalledMod{},
+	}
+	if err := state.Save(instanceDir); err != nil {
+		t.Fatalf("Save failed: %v", err)
+	}
+
+	var githubReleasesHits, mavenMetadataHits int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/GTNewHorizons/DreamAssemblerXXL/master/releases/manifests/daily.json":
+			writeJSON(t, w, map[string]any{
+				"version":       "daily",
+				"last_version":  "daily-previous",
+				"last_updated":  "2026-02-20",
+				"config":        "cfg-1",
+				"github_mods":   map[string]any{"TestMod": map[string]any{"version": "1.0.0", "side": "BOTH"}},
+				"external_mods": map[string]any{},
+			})
+		case "/GTNewHorizons/DreamAssemblerXXL/master/gtnh-assets.json":
+			writeJSON(t, w, map[string]any{
+				"config": map[string]any{"versions": []any{}},
+				"mods": []any{
+					map[string]any{
+						"name":           "TestMod",
+						"latest_version": "1.0.0",
+						"source":         "",
+						"side":           "BOTH",
+						"versions": []any{
+							map[string]any{
+								"version_tag":          "1.0.0",
+								"filename":             "TestMod-1.0.0.jar",
+								"download_url":         "https://api.github.com/repos/GTNewHorizons/TestMod/releases/assets/1",
+								"browser_download_url": "https://github.com/GTNewHorizons/TestMod/releases/download/1.0.0/TestMod-1.0.0.jar",
+								"prerelease":           false,
+							},
+						},
+					},
+				},
+			})
+		case "/repos/GTNewHorizons/TestMod/releases":
+			githubReleasesHits++
+			writeJSON(t, w, []any{
+				map[string]any{
+					"tag_name":   "1.2.0",
+					"prerelease": false,
+					"assets": []any{
+						map[string]any{
+							"name":                 "TestMod-1.2.0.jar",
+							"browser_download_url": "https://github.com/GTNewHorizons/TestMod/releases/download/1.2.0/TestMod-1.2.0.jar",
+							"url":                  "https://api.github.com/repos/GTNewHorizons/TestMod/releases/assets/2",
+						},
+					},
+				},
+			})
+		case "/repository/releases/com/github/GTNewHorizons/TestMod/maven-metadata.xml":
+			mavenMetadataHits++
+			w.Header().Set("Content-Type", "application/xml")
+			if _, err := w.Write([]byte(`<metadata><versioning><release>1.1.0</release><versions><version>1.0.0</version><version>1.1.0</version></versions></versioning></metadata>`)); err != nil {
+				t.Fatalf("write maven metadata: %v", err)
+			}
+		case "/GTNewHorizons/TestMod/releases/download/1.2.0/TestMod-1.2.0.jar":
+			if _, err := w.Write([]byte("from-github-1.2.0")); err != nil {
+				t.Fatalf("write jar: %v", err)
+			}
+		case "/repository/releases/com/github/GTNewHorizons/TestMod/1.2.0/TestMod-1.2.0.jar.sha256",
+			"/repository/releases/com/github/GTNewHorizons/TestMod/1.2.0/TestMod-1.2.0.jar":
+			// withMavenFallback probes Maven for a fallback hash/URL on the
+			// GitHub-chosen version; the GitHub download succeeds so this is unused.
+			w.WriteHeader(http.StatusNotFound)
+		case "/repos/GTNewHorizons/GT-New-Horizons-Modpack/releases":
+			writeJSON(t, w, []any{})
+		default:
+			t.Fatalf("unexpected request path: %s", r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	restore := rewriteAllHTTPClients(t, server)
+	defer restore()
+
+	result, err := Run(context.Background(), Options{
+		InstanceDir: instanceDir,
+		Latest:      true,
+		Concurrency: 2,
+		NoCache:     true,
+	})
+	if err != nil {
+		t.Fatalf("Run failed: %v", err)
+	}
+	if result.Added != 1 {
+		t.Fatalf("unexpected summary: %+v", result)
+	}
+	if githubReleasesHits == 0 {
+		t.Fatalf("expected GitHub releases to be queried")
+	}
+	if mavenMetadataHits != 0 {
+		t.Fatalf("Maven metadata must NOT be consulted when GitHub is reachable; hits=%d", mavenMetadataHits)
+	}
+	if _, err := os.Stat(filepath.Join(instanceDir, "mods", "TestMod-1.2.0.jar")); err != nil {
+		t.Fatalf("expected GitHub version 1.2.0 jar on disk: %v", err)
+	}
+	data, _ := os.ReadFile(filepath.Join(instanceDir, "mods", "TestMod-1.2.0.jar"))
+	if string(data) != "from-github-1.2.0" {
+		t.Fatalf("unexpected jar contents: %q", string(data))
+	}
+}
+
+func TestResolveLatest_AuthFailsFallsBackToAnon(t *testing.T) {
+	instanceDir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(instanceDir, "mods"), 0o755); err != nil {
+		t.Fatalf("MkdirAll failed: %v", err)
+	}
+	state := &config.LocalState{
+		Side: "client", ManifestDate: "2026-02-19", ConfigVersion: "cfg-1",
+		Mods: map[string]config.InstalledMod{},
+	}
+	if err := state.Save(instanceDir); err != nil {
+		t.Fatalf("Save failed: %v", err)
+	}
+
+	var authedAttempts, anonAttempts int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/GTNewHorizons/DreamAssemblerXXL/master/releases/manifests/daily.json":
+			writeJSON(t, w, map[string]any{
+				"version": "daily", "last_version": "daily-previous", "last_updated": "2026-02-20",
+				"config":      "cfg-1",
+				"github_mods": map[string]any{"TestMod": map[string]any{"version": "1.0.0", "side": "BOTH"}},
+				"external_mods": map[string]any{},
+			})
+		case "/GTNewHorizons/DreamAssemblerXXL/master/gtnh-assets.json":
+			writeJSON(t, w, map[string]any{
+				"config": map[string]any{"versions": []any{}},
+				"mods": []any{map[string]any{
+					"name": "TestMod", "latest_version": "1.0.0", "source": "", "side": "BOTH",
+					"versions": []any{map[string]any{
+						"version_tag": "1.0.0", "filename": "TestMod-1.0.0.jar",
+						"download_url":         "https://api.github.com/repos/GTNewHorizons/TestMod/releases/assets/1",
+						"browser_download_url": "https://github.com/GTNewHorizons/TestMod/releases/download/1.0.0/TestMod-1.0.0.jar",
+						"prerelease":           false,
+					}},
+				}},
+			})
+		case "/repos/GTNewHorizons/TestMod/releases":
+			if r.Header.Get("Authorization") != "" {
+				authedAttempts++
+				w.WriteHeader(http.StatusForbidden)
+				return
+			}
+			anonAttempts++
+			writeJSON(t, w, []any{map[string]any{
+				"tag_name": "1.2.0", "prerelease": false,
+				"assets": []any{map[string]any{
+					"name":                 "TestMod-1.2.0.jar",
+					"browser_download_url": "https://github.com/GTNewHorizons/TestMod/releases/download/1.2.0/TestMod-1.2.0.jar",
+				}},
+			}})
+		case "/GTNewHorizons/TestMod/releases/download/1.2.0/TestMod-1.2.0.jar":
+			if _, err := w.Write([]byte("anon-jar")); err != nil {
+				t.Fatalf("write jar: %v", err)
+			}
+		case "/repository/releases/com/github/GTNewHorizons/TestMod/1.2.0/TestMod-1.2.0.jar.sha256",
+			"/repository/releases/com/github/GTNewHorizons/TestMod/1.2.0/TestMod-1.2.0.jar":
+			w.WriteHeader(http.StatusNotFound)
+		case "/repos/GTNewHorizons/GT-New-Horizons-Modpack/releases":
+			writeJSON(t, w, []any{})
+		default:
+			t.Fatalf("unexpected request path: %s", r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	restore := rewriteAllHTTPClients(t, server)
+	defer restore()
+
+	if _, err := Run(context.Background(), Options{
+		InstanceDir: instanceDir, Latest: true, Concurrency: 2, NoCache: true,
+		GithubToken: "test-token",
+	}); err != nil {
+		t.Fatalf("Run failed: %v", err)
+	}
+	if authedAttempts == 0 {
+		t.Fatalf("expected an authenticated attempt first")
+	}
+	if anonAttempts == 0 {
+		t.Fatalf("expected an anonymous retry after auth failure")
+	}
+	if _, err := os.Stat(filepath.Join(instanceDir, "mods", "TestMod-1.2.0.jar")); err != nil {
+		t.Fatalf("expected 1.2.0 jar from anon retry: %v", err)
+	}
+}
+
+func TestResolveLatest_GitHubUnreachableUsesMaven(t *testing.T) {
+	instanceDir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(instanceDir, "mods"), 0o755); err != nil {
+		t.Fatalf("MkdirAll failed: %v", err)
+	}
+	state := &config.LocalState{
+		Side: "client", ManifestDate: "2026-02-19", ConfigVersion: "cfg-1",
+		Mods: map[string]config.InstalledMod{},
+	}
+	if err := state.Save(instanceDir); err != nil {
+		t.Fatalf("Save failed: %v", err)
+	}
+
+	var mavenMetadataHits int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/GTNewHorizons/DreamAssemblerXXL/master/releases/manifests/daily.json":
+			writeJSON(t, w, map[string]any{
+				"version": "daily", "last_version": "daily-previous", "last_updated": "2026-02-20",
+				"config":      "cfg-1",
+				"github_mods": map[string]any{"TestMod": map[string]any{"version": "1.0.0", "side": "BOTH"}},
+				"external_mods": map[string]any{},
+			})
+		case "/GTNewHorizons/DreamAssemblerXXL/master/gtnh-assets.json":
+			writeJSON(t, w, map[string]any{
+				"config": map[string]any{"versions": []any{}},
+				"mods": []any{map[string]any{
+					"name": "TestMod", "latest_version": "1.0.0", "source": "", "side": "BOTH",
+					"versions": []any{map[string]any{
+						"version_tag": "1.0.0", "filename": "TestMod-1.0.0.jar",
+						"download_url":         "https://api.github.com/repos/GTNewHorizons/TestMod/releases/assets/1",
+						"browser_download_url": "https://github.com/GTNewHorizons/TestMod/releases/download/1.0.0/TestMod-1.0.0.jar",
+						"prerelease":           false,
+					}},
+				}},
+			})
+		case "/repos/GTNewHorizons/TestMod/releases":
+			w.WriteHeader(http.StatusInternalServerError)
+		case "/repository/releases/com/github/GTNewHorizons/TestMod/maven-metadata.xml":
+			mavenMetadataHits++
+			w.Header().Set("Content-Type", "application/xml")
+			if _, err := w.Write([]byte(`<metadata><versioning><release>1.1.0</release><versions><version>1.0.0</version><version>1.1.0</version></versions></versioning></metadata>`)); err != nil {
+				t.Fatalf("write maven metadata: %v", err)
+			}
+		case "/repository/releases/com/github/GTNewHorizons/TestMod/1.1.0/TestMod-1.1.0.jar":
+			if _, err := w.Write([]byte("from-maven-1.1.0")); err != nil {
+				t.Fatalf("write jar: %v", err)
+			}
+		case "/repository/releases/com/github/GTNewHorizons/TestMod/1.1.0/TestMod-1.1.0.jar.sha256":
+			w.WriteHeader(http.StatusNotFound)
+		case "/repos/GTNewHorizons/GT-New-Horizons-Modpack/releases":
+			w.WriteHeader(http.StatusInternalServerError)
+		default:
+			t.Fatalf("unexpected request path: %s", r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	restore := rewriteAllHTTPClients(t, server)
+	defer restore()
+
+	if _, err := Run(context.Background(), Options{
+		InstanceDir: instanceDir, Latest: true, Concurrency: 2, NoCache: true,
+	}); err != nil {
+		t.Fatalf("Run failed: %v", err)
+	}
+	if mavenMetadataHits == 0 {
+		t.Fatalf("expected Maven fallback when GitHub is unreachable")
+	}
+	if _, err := os.Stat(filepath.Join(instanceDir, "mods", "TestMod-1.1.0.jar")); err != nil {
+		t.Fatalf("expected Maven version 1.1.0 jar on disk: %v", err)
+	}
+}
+
+func TestResolveLatest_GitHubOlderDoesNotConsultMaven(t *testing.T) {
+	instanceDir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(instanceDir, "mods"), 0o755); err != nil {
+		t.Fatalf("MkdirAll failed: %v", err)
+	}
+	state := &config.LocalState{
+		Side: "client", ManifestDate: "2026-02-19", ConfigVersion: "cfg-1",
+		Mods: map[string]config.InstalledMod{},
+	}
+	if err := state.Save(instanceDir); err != nil {
+		t.Fatalf("Save failed: %v", err)
+	}
+
+	var mavenMetadataHits int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/GTNewHorizons/DreamAssemblerXXL/master/releases/manifests/daily.json":
+			writeJSON(t, w, map[string]any{
+				"version": "daily", "last_version": "daily-previous", "last_updated": "2026-02-20",
+				"config":      "cfg-1",
+				"github_mods": map[string]any{"TestMod": map[string]any{"version": "1.0.0", "side": "BOTH"}},
+				"external_mods": map[string]any{},
+			})
+		case "/GTNewHorizons/DreamAssemblerXXL/master/gtnh-assets.json":
+			writeJSON(t, w, map[string]any{
+				"config": map[string]any{"versions": []any{}},
+				"mods": []any{map[string]any{
+					"name": "TestMod", "latest_version": "1.0.0", "source": "", "side": "BOTH",
+					"versions": []any{map[string]any{
+						"version_tag": "1.0.0", "filename": "TestMod-1.0.0.jar",
+						"download_url":         "https://api.github.com/repos/GTNewHorizons/TestMod/releases/assets/1",
+						"browser_download_url": "https://github.com/GTNewHorizons/TestMod/releases/download/1.0.0/TestMod-1.0.0.jar",
+						"prerelease":           false,
+					}},
+				}},
+			})
+		case "/repos/GTNewHorizons/TestMod/releases":
+			writeJSON(t, w, []any{map[string]any{
+				"tag_name": "1.0.0", "prerelease": false,
+				"assets": []any{map[string]any{
+					"name":                 "TestMod-1.0.0.jar",
+					"browser_download_url": "https://github.com/GTNewHorizons/TestMod/releases/download/1.0.0/TestMod-1.0.0.jar",
+				}},
+			}})
+		case "/repository/releases/com/github/GTNewHorizons/TestMod/maven-metadata.xml":
+			mavenMetadataHits++
+			w.Header().Set("Content-Type", "application/xml")
+			if _, err := w.Write([]byte(`<metadata><versioning><release>1.1.0</release><versions><version>1.0.0</version><version>1.1.0</version></versions></versioning></metadata>`)); err != nil {
+				t.Fatalf("write maven metadata: %v", err)
+			}
+		case "/GTNewHorizons/TestMod/releases/download/1.0.0/TestMod-1.0.0.jar":
+			if _, err := w.Write([]byte("from-github-1.0.0")); err != nil {
+				t.Fatalf("write jar: %v", err)
+			}
+		case "/repository/releases/com/github/GTNewHorizons/TestMod/1.0.0/TestMod-1.0.0.jar.sha256",
+			"/repository/releases/com/github/GTNewHorizons/TestMod/1.0.0/TestMod-1.0.0.jar":
+			w.WriteHeader(http.StatusNotFound)
+		case "/repos/GTNewHorizons/GT-New-Horizons-Modpack/releases":
+			writeJSON(t, w, []any{})
+		default:
+			t.Fatalf("unexpected request path: %s", r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	restore := rewriteAllHTTPClients(t, server)
+	defer restore()
+
+	result, err := Run(context.Background(), Options{
+		InstanceDir: instanceDir, Latest: true, Concurrency: 2, NoCache: true,
+	})
+	if err != nil {
+		t.Fatalf("Run failed: %v", err)
+	}
+	if result.Updated != 0 {
+		t.Fatalf("expected no update when GitHub latest == current; got %+v", result)
+	}
+	if mavenMetadataHits != 0 {
+		t.Fatalf("Maven must NOT be consulted when GitHub is reachable; hits=%d", mavenMetadataHits)
+	}
+	if _, err := os.Stat(filepath.Join(instanceDir, "mods", "TestMod-1.0.0.jar")); err != nil {
+		t.Fatalf("expected 1.0.0 jar (added at manifest version): %v", err)
+	}
 }
