@@ -146,20 +146,22 @@ func resolveLatestVersions(ctx context.Context, db *assets.AssetsDB, changes []d
 		}
 	}
 
-	// Pass 2: check Maven metadata for GTNH-hosted mods to catch versions
-	// not yet in the assets DB.
-	logging.Infoln("Checking Maven for latest versions...")
+	// Pass 2: for each GTNH-hosted mod resolve the latest release preferring
+	// GitHub (token if available, anonymous fallback) and dropping to Nexus/Maven
+	// only when GitHub is unreachable. A reachable GitHub response is authoritative.
+	logging.Infoln("Checking GitHub and Maven for latest versions...")
 
-	type mavenResult struct {
+	type latestResult struct {
 		idx     int
 		version string
+		extra   *resolvedExtra // non-nil when resolved from GitHub
 	}
 
 	var (
-		mavenMu      sync.Mutex
-		mavenResults []mavenResult
-		mavenWG      sync.WaitGroup
-		mavenSem     = make(chan struct{}, opts.Concurrency)
+		mu      sync.Mutex
+		results []latestResult
+		wg      sync.WaitGroup
+		sem     = make(chan struct{}, opts.Concurrency)
 	)
 
 	for i, c := range changes {
@@ -173,107 +175,61 @@ func resolveLatestVersions(ctx context.Context, db *assets.AssetsDB, changes []d
 			continue
 		}
 
-		mavenWG.Add(1)
-		go func(idx int, modName, currentVer string) {
-			defer mavenWG.Done()
-			mavenSem <- struct{}{}
-			defer func() { <-mavenSem }()
+		wg.Add(1)
+		go func(idx int, name, currentVer string) {
+			defer wg.Done()
+			sem <- struct{}{}
+			defer func() { <-sem }()
 
-			var latestVer string
+			if repo := db.GitHubRepo(name); repo != "" {
+				if gh := fetchLatestReleasePreferToken(ctx, repo, opts.GithubToken, opts.AllowPreRelease); gh != nil {
+					// GitHub reachable: authoritative. Override only when newer.
+					if semver.Compare(gh.Version, currentVer) > 0 {
+						extra := resolvedExtra{
+							URL:         gh.URL,
+							Filename:    gh.Filename,
+							IsGitHubAPI: gh.IsAPI,
+						}
+						if d := strings.TrimPrefix(gh.Digest, "sha256:"); d != "" && d != gh.Digest {
+							extra.ExpectedHash = d
+							extra.HashAlgo = "sha256"
+						}
+						mu.Lock()
+						results = append(results, latestResult{idx: idx, version: gh.Version, extra: &extra})
+						mu.Unlock()
+					}
+					return // do not consult Maven
+				}
+			}
+
+			// GitHub unreachable (or no known repo): fall back to Nexus/Maven.
+			var mavenVer string
 			var err error
 			if opts.AllowPreRelease {
-				latestVer, err = maven.LatestAnyVersion(ctx, modName)
+				mavenVer, err = maven.LatestAnyVersion(ctx, name)
 			} else {
-				latestVer, err = maven.LatestNonPreVersion(ctx, modName)
+				mavenVer, err = maven.LatestNonPreVersion(ctx, name)
 			}
 			if err != nil {
 				return
 			}
-			if semver.Compare(latestVer, currentVer) > 0 {
-				mavenMu.Lock()
-				mavenResults = append(mavenResults, mavenResult{idx: idx, version: latestVer})
-				mavenMu.Unlock()
+			if semver.Compare(mavenVer, currentVer) > 0 {
+				mu.Lock()
+				results = append(results, latestResult{idx: idx, version: mavenVer})
+				mu.Unlock()
 			}
 		}(i, c.Name, c.NewVersion)
 	}
-	mavenWG.Wait()
+	wg.Wait()
 
-	for _, r := range mavenResults {
-		logging.Debugf("Verbose: maven latest override %s %s -> %s\n", changes[r.idx].Name, changes[r.idx].NewVersion, r.version)
+	for _, r := range results {
+		logging.Debugf("Verbose: latest override %s %s -> %s (github=%t)\n", changes[r.idx].Name, changes[r.idx].NewVersion, r.version, r.extra != nil)
 		changes[r.idx].NewVersion = r.version
 		if changes[r.idx].Type == diff.Unchanged {
 			changes[r.idx].Type = diff.Updated
 		}
-	}
-
-	// Pass 3: check GitHub releases for GTNH mods only. Only runs when a token is provided.
-	if opts.GithubToken != "" {
-		logging.Infoln("Checking GitHub for latest releases...")
-
-		type ghResult struct {
-			idx    int
-			result *github.LatestResult
-		}
-
-		var (
-			mu      sync.Mutex
-			results []ghResult
-			wg      sync.WaitGroup
-			sem     = make(chan struct{}, opts.Concurrency)
-		)
-
-		for i, c := range changes {
-			if c.Type == diff.Removed {
-				continue
-			}
-			if _, isExtra := extraDownloads[c.Name]; isExtra {
-				continue
-			}
-			// Only check GTNH-hosted mods
-			if !db.IsGTNH(c.Name) {
-				continue
-			}
-			repo := db.GitHubRepo(c.Name)
-			if repo == "" {
-				continue
-			}
-
-			wg.Add(1)
-			go func(idx int, name, repo, currentVer string) {
-				defer wg.Done()
-				sem <- struct{}{}
-				defer func() { <-sem }()
-
-				gh, err := github.FetchLatestRelease(ctx, repo, opts.GithubToken, opts.AllowPreRelease)
-				if err != nil {
-					return
-				}
-				// Only use the GitHub version if it's semantically newer
-				if semver.Compare(gh.Version, currentVer) > 0 {
-					mu.Lock()
-					results = append(results, ghResult{idx: idx, result: gh})
-					mu.Unlock()
-				}
-			}(i, c.Name, repo, c.NewVersion)
-		}
-		wg.Wait()
-
-		for _, r := range results {
-			logging.Debugf("Verbose: github latest override %s %s -> %s (asset=%s)\n", changes[r.idx].Name, changes[r.idx].NewVersion, r.result.Version, r.result.Filename)
-			changes[r.idx].NewVersion = r.result.Version
-			if changes[r.idx].Type == diff.Unchanged {
-				changes[r.idx].Type = diff.Updated
-			}
-			extra := resolvedExtra{
-				URL:         r.result.URL,
-				Filename:    r.result.Filename,
-				IsGitHubAPI: r.result.IsAPI,
-			}
-			if d := strings.TrimPrefix(r.result.Digest, "sha256:"); d != "" && d != r.result.Digest {
-				extra.ExpectedHash = d
-				extra.HashAlgo = "sha256"
-			}
-			latestDownloads[changes[r.idx].Name] = extra
+		if r.extra != nil {
+			latestDownloads[changes[r.idx].Name] = *r.extra
 		}
 	}
 
@@ -285,6 +241,21 @@ func resolveLatestVersions(ctx context.Context, db *assets.AssetsDB, changes []d
 			changes[i].Type = diff.Unchanged
 		}
 	}
+}
+
+// fetchLatestReleasePreferToken resolves a repo's latest GitHub release,
+// preferring an authenticated request when a token is set and retrying once
+// anonymously if the authenticated attempt errors. Returns nil only when GitHub
+// is unreachable after both attempts.
+func fetchLatestReleasePreferToken(ctx context.Context, repo, token string, allowPre bool) *github.LatestResult {
+	gh, err := github.FetchLatestRelease(ctx, repo, token, allowPre)
+	if err != nil && token != "" {
+		gh, err = github.FetchLatestRelease(ctx, repo, "", allowPre)
+	}
+	if err != nil {
+		return nil
+	}
+	return gh
 }
 
 // resolveExtraMod resolves an extra mod spec into version/side info and download details.
