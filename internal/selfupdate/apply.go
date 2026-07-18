@@ -105,9 +105,16 @@ func Replace(currentExe, newBinary string) error {
 			return fmt.Errorf("moving current exe: %w", err)
 		}
 		if err := os.Rename(newBinary, currentExe); err != nil {
-			// best-effort rollback
-			_ = os.Rename(old, currentExe)
-			return fmt.Errorf("installing new exe: %w", err)
+			// cross-device rename fails when cache and exe are on
+			// different drives; fall back to copy (target path is free
+			// now that the old exe was renamed aside).
+			if copyErr := copyFile(newBinary, currentExe); copyErr != nil {
+				// best-effort rollback
+				_ = os.Remove(currentExe)
+				_ = os.Rename(old, currentExe)
+				return fmt.Errorf("installing new exe: %w (rename) / %w (copy)", err, copyErr)
+			}
+			_ = os.Remove(newBinary)
 		}
 		return nil
 	}
