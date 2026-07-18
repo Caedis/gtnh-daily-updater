@@ -668,13 +668,20 @@ func TestRun_GitHubDownloadFailureFallsBackToMaven(t *testing.T) {
 			if _, err := w.Write([]byte("from-maven")); err != nil {
 				t.Fatalf("writing maven response: %v", err)
 			}
+		case "/repository/releases/com/github/GTNewHorizons/TestMod/1.0.0/TestMod-1.0.0.jar.sha256":
+			// withMavenFallback probes for a fallback hash; none published here.
+			w.WriteHeader(http.StatusNotFound)
+		case "/service/rest/v1/search":
+			writeJSON(t, w, map[string]any{
+				"items": []any{map[string]any{"group": "com.github.GTNewHorizons", "version": "1.0.0"}},
+			})
 		default:
 			t.Fatalf("unexpected request path: %s", r.URL.Path)
 		}
 	}))
 	defer server.Close()
 
-	restoreClient := rewriteDefaultHTTPClient(t, server)
+	restoreClient := rewriteAllHTTPClients(t, server)
 	defer restoreClient()
 
 	result, err := Run(context.Background(), Options{
@@ -1146,6 +1153,10 @@ func TestResolveLatest_GitHubPreferredOverMavenNoToken(t *testing.T) {
 			w.WriteHeader(http.StatusNotFound)
 		case "/repos/GTNewHorizons/GT-New-Horizons-Modpack/releases":
 			writeJSON(t, w, []any{})
+		case "/service/rest/v1/search":
+			writeJSON(t, w, map[string]any{
+				"items": []any{map[string]any{"group": "com.github.GTNewHorizons", "version": "1.0.0"}},
+			})
 		default:
 			t.Fatalf("unexpected request path: %s", r.URL.Path)
 		}
@@ -1241,6 +1252,10 @@ func TestResolveLatest_AuthFailsFallsBackToAnon(t *testing.T) {
 			w.WriteHeader(http.StatusNotFound)
 		case "/repos/GTNewHorizons/GT-New-Horizons-Modpack/releases":
 			writeJSON(t, w, []any{})
+		case "/service/rest/v1/search":
+			writeJSON(t, w, map[string]any{
+				"items": []any{map[string]any{"group": "com.github.GTNewHorizons", "version": "1.0.0"}},
+			})
 		default:
 			t.Fatalf("unexpected request path: %s", r.URL.Path)
 		}
@@ -1319,6 +1334,10 @@ func TestResolveLatest_GitHubUnreachableUsesMaven(t *testing.T) {
 			w.WriteHeader(http.StatusNotFound)
 		case "/repos/GTNewHorizons/GT-New-Horizons-Modpack/releases":
 			w.WriteHeader(http.StatusInternalServerError)
+		case "/service/rest/v1/search":
+			writeJSON(t, w, map[string]any{
+				"items": []any{map[string]any{"group": "com.github.GTNewHorizons", "version": "1.0.0"}},
+			})
 		default:
 			t.Fatalf("unexpected request path: %s", r.URL.Path)
 		}
@@ -1400,6 +1419,10 @@ func TestResolveLatest_GitHubOlderDoesNotConsultMaven(t *testing.T) {
 			w.WriteHeader(http.StatusNotFound)
 		case "/repos/GTNewHorizons/GT-New-Horizons-Modpack/releases":
 			writeJSON(t, w, []any{})
+		case "/service/rest/v1/search":
+			writeJSON(t, w, map[string]any{
+				"items": []any{map[string]any{"group": "com.github.GTNewHorizons", "version": "1.0.0"}},
+			})
 		default:
 			t.Fatalf("unexpected request path: %s", r.URL.Path)
 		}

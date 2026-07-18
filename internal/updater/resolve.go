@@ -78,7 +78,7 @@ func resolveModDownload(ctx context.Context, db *assets.AssetsDB, modName, versi
 
 	// Maven fallback for GTNH-hosted mods
 	if db.IsGTNH(modName) {
-		if mavenURL, mavenFn := maven.DownloadURL(modName, version); mavenURL != "" && mavenFn != "" {
+		if mavenURL, mavenFn, err := maven.DownloadURL(ctx, modName, version); err == nil && mavenURL != "" && mavenFn != "" {
 			d := downloader.Download{URL: mavenURL, Filename: mavenFn, ModName: modName}
 			if sha, _ := maven.FetchSHA256(ctx, mavenURL); sha != "" {
 				d.ExpectedHash = sha
@@ -95,8 +95,8 @@ func withMavenFallback(ctx context.Context, dl downloader.Download, db *assets.A
 	if !db.IsGTNH(modName) || !isGitHubDownload(dl.URL, dl.IsGitHubAPI) {
 		return dl
 	}
-	mavenURL, _ := maven.DownloadURL(modName, version)
-	if strings.TrimSpace(mavenURL) == "" || mavenURL == dl.URL {
+	mavenURL, _, err := maven.DownloadURL(ctx, modName, version)
+	if err != nil || strings.TrimSpace(mavenURL) == "" || mavenURL == dl.URL {
 		return dl
 	}
 	dl.MavenFallbackURL = mavenURL
@@ -286,7 +286,10 @@ func resolveExtraMod(ctx context.Context, name string, spec config.ExtraModSpec,
 
 		// Try Maven first for GTNH-hosted mods
 		if db.IsGTNH(name) {
-			mavenURL, mavenFn := maven.DownloadURL(name, version)
+			mavenURL, mavenFn, err := maven.DownloadURL(ctx, name, version)
+			if err != nil {
+				return diff.ResolvedExtraMod{}, resolvedExtra{}, err
+			}
 			logging.Debugf("Verbose: extra mod %s using maven download filename=%s\n", name, mavenFn)
 			extra := resolvedExtra{URL: mavenURL, Filename: mavenFn}
 			if sha, _ := maven.FetchSHA256(ctx, mavenURL); sha != "" {
