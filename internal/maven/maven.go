@@ -92,6 +92,13 @@ func ResolveGroup(ctx context.Context, modName string) (string, error) {
 	return g, nil
 }
 
+// ResetGroupCache clears the resolved-group cache. For test isolation.
+func ResetGroupCache() {
+	groupCacheMu.Lock()
+	groupCache = map[string]string{}
+	groupCacheMu.Unlock()
+}
+
 func searchGroup(ctx context.Context, modName string) (string, error) {
 	u := searchBase + "?repository=releases&maven.artifactId=" + url.QueryEscape(modName)
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)

@@ -609,6 +609,7 @@ func TestRun_LatestOutOfAssetsDBIsNotRepeatedlyAdded(t *testing.T) {
 }
 
 func TestRun_GitHubDownloadFailureFallsBackToMaven(t *testing.T) {
+	maven.ResetGroupCache()
 	instanceDir := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(instanceDir, "mods"), 0o755); err != nil {
 		t.Fatalf("MkdirAll failed: %v", err)
@@ -1074,6 +1075,7 @@ func rewriteAllHTTPClients(t *testing.T, server *httptest.Server) func() {
 }
 
 func TestResolveLatest_GitHubPreferredOverMavenNoToken(t *testing.T) {
+	maven.ResetGroupCache()
 	instanceDir := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(instanceDir, "mods"), 0o755); err != nil {
 		t.Fatalf("MkdirAll failed: %v", err)
@@ -1194,6 +1196,7 @@ func TestResolveLatest_GitHubPreferredOverMavenNoToken(t *testing.T) {
 }
 
 func TestResolveLatest_AuthFailsFallsBackToAnon(t *testing.T) {
+	maven.ResetGroupCache()
 	instanceDir := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(instanceDir, "mods"), 0o755); err != nil {
 		t.Fatalf("MkdirAll failed: %v", err)
@@ -1283,6 +1286,7 @@ func TestResolveLatest_AuthFailsFallsBackToAnon(t *testing.T) {
 }
 
 func TestResolveLatest_GitHubUnreachableUsesMaven(t *testing.T) {
+	maven.ResetGroupCache()
 	instanceDir := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(instanceDir, "mods"), 0o755); err != nil {
 		t.Fatalf("MkdirAll failed: %v", err)
@@ -1361,6 +1365,7 @@ func TestResolveLatest_GitHubUnreachableUsesMaven(t *testing.T) {
 }
 
 func TestResolveLatest_GitHubOlderDoesNotConsultMaven(t *testing.T) {
+	maven.ResetGroupCache()
 	instanceDir := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(instanceDir, "mods"), 0o755); err != nil {
 		t.Fatalf("MkdirAll failed: %v", err)
