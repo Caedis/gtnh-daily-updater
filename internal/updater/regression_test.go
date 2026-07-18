@@ -609,6 +609,7 @@ func TestRun_LatestOutOfAssetsDBIsNotRepeatedlyAdded(t *testing.T) {
 }
 
 func TestRun_GitHubDownloadFailureFallsBackToMaven(t *testing.T) {
+	maven.ResetGroupCache()
 	instanceDir := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(instanceDir, "mods"), 0o755); err != nil {
 		t.Fatalf("MkdirAll failed: %v", err)
@@ -668,13 +669,20 @@ func TestRun_GitHubDownloadFailureFallsBackToMaven(t *testing.T) {
 			if _, err := w.Write([]byte("from-maven")); err != nil {
 				t.Fatalf("writing maven response: %v", err)
 			}
+		case "/repository/releases/com/github/GTNewHorizons/TestMod/1.0.0/TestMod-1.0.0.jar.sha256":
+			// withMavenFallback probes for a fallback hash; none published here.
+			w.WriteHeader(http.StatusNotFound)
+		case "/service/rest/v1/search":
+			writeJSON(t, w, map[string]any{
+				"items": []any{map[string]any{"group": "com.github.GTNewHorizons", "version": "1.0.0"}},
+			})
 		default:
 			t.Fatalf("unexpected request path: %s", r.URL.Path)
 		}
 	}))
 	defer server.Close()
 
-	restoreClient := rewriteDefaultHTTPClient(t, server)
+	restoreClient := rewriteAllHTTPClients(t, server)
 	defer restoreClient()
 
 	result, err := Run(context.Background(), Options{
@@ -701,6 +709,113 @@ func TestRun_GitHubDownloadFailureFallsBackToMaven(t *testing.T) {
 		t.Fatalf("ReadFile failed: %v", err)
 	}
 	if string(data) != "from-maven" {
+		t.Fatalf("unexpected jar contents: %q", string(data))
+	}
+}
+
+func TestRun_NonGTNHGroupResolvesAndDownloads(t *testing.T) {
+	// Automagy is a GTNH-manifest mod published under group tuhljin.automagy,
+	// not com.github.GTNewHorizons. The Maven fallback must resolve that group
+	// from Nexus search and download from the slashed group path.
+	maven.ResetGroupCache()
+	instanceDir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(instanceDir, "mods"), 0o755); err != nil {
+		t.Fatalf("MkdirAll failed: %v", err)
+	}
+
+	state := &config.LocalState{
+		Side:          "client",
+		ManifestDate:  "2026-02-19",
+		ConfigVersion: "cfg-1",
+		Mods:          map[string]config.InstalledMod{},
+	}
+	if err := state.Save(instanceDir); err != nil {
+		t.Fatalf("Save failed: %v", err)
+	}
+
+	var githubAttempts, mavenAttempts int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/GTNewHorizons/DreamAssemblerXXL/master/releases/manifests/daily.json":
+			writeJSON(t, w, map[string]any{
+				"version":       "daily",
+				"last_version":  "daily-previous",
+				"last_updated":  "2026-02-20",
+				"config":        "cfg-1",
+				"github_mods":   map[string]any{"Automagy": map[string]any{"version": "1.0.0", "side": "BOTH"}},
+				"external_mods": map[string]any{},
+			})
+		case "/GTNewHorizons/DreamAssemblerXXL/master/gtnh-assets.json":
+			writeJSON(t, w, map[string]any{
+				"config": map[string]any{"versions": []any{}},
+				"mods": []any{
+					map[string]any{
+						"name":           "Automagy",
+						"latest_version": "1.0.0",
+						"source":         "",
+						"side":           "BOTH",
+						"versions": []any{
+							map[string]any{
+								"version_tag":          "1.0.0",
+								"filename":             "Automagy-1.0.0.jar",
+								"download_url":         "https://api.github.com/repos/GTNewHorizons/Automagy/releases/assets/1",
+								"browser_download_url": "https://github.com/GTNewHorizons/Automagy/releases/download/1.0.0/Automagy-1.0.0.jar",
+								"prerelease":           false,
+							},
+						},
+					},
+				},
+			})
+		case "/repos/GTNewHorizons/Automagy/releases/assets/1":
+			githubAttempts++
+			w.WriteHeader(http.StatusForbidden)
+		case "/repository/releases/tuhljin/automagy/Automagy/1.0.0/Automagy-1.0.0.jar":
+			mavenAttempts++
+			if _, err := w.Write([]byte("from-nongtnh-maven")); err != nil {
+				t.Fatalf("writing maven response: %v", err)
+			}
+		case "/repository/releases/tuhljin/automagy/Automagy/1.0.0/Automagy-1.0.0.jar.sha256":
+			w.WriteHeader(http.StatusNotFound)
+		case "/service/rest/v1/search":
+			if got := r.URL.Query().Get("maven.artifactId"); got != "Automagy" {
+				t.Fatalf("unexpected search artifactId: %q", got)
+			}
+			writeJSON(t, w, map[string]any{
+				"items": []any{map[string]any{"group": "tuhljin.automagy", "version": "0.29.7-GTNH"}},
+			})
+		default:
+			t.Fatalf("unexpected request path: %s", r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	restoreClient := rewriteAllHTTPClients(t, server)
+	defer restoreClient()
+
+	result, err := Run(context.Background(), Options{
+		InstanceDir: instanceDir,
+		GithubToken: "test-token",
+		NoCache:     true,
+	})
+	if err != nil {
+		t.Fatalf("Run failed: %v", err)
+	}
+	if result.Added != 1 || result.Updated != 0 || result.Removed != 0 {
+		t.Fatalf("unexpected summary: %+v", result)
+	}
+	if githubAttempts == 0 {
+		t.Fatalf("expected at least one GitHub attempt")
+	}
+	if mavenAttempts == 0 {
+		t.Fatalf("expected Maven fallback attempt via resolved non-GTNH group path")
+	}
+
+	jarPath := filepath.Join(instanceDir, "mods", "Automagy-1.0.0.jar")
+	data, err := os.ReadFile(jarPath)
+	if err != nil {
+		t.Fatalf("ReadFile failed: %v", err)
+	}
+	if string(data) != "from-nongtnh-maven" {
 		t.Fatalf("unexpected jar contents: %q", string(data))
 	}
 }
@@ -1067,6 +1182,7 @@ func rewriteAllHTTPClients(t *testing.T, server *httptest.Server) func() {
 }
 
 func TestResolveLatest_GitHubPreferredOverMavenNoToken(t *testing.T) {
+	maven.ResetGroupCache()
 	instanceDir := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(instanceDir, "mods"), 0o755); err != nil {
 		t.Fatalf("MkdirAll failed: %v", err)
@@ -1146,6 +1262,10 @@ func TestResolveLatest_GitHubPreferredOverMavenNoToken(t *testing.T) {
 			w.WriteHeader(http.StatusNotFound)
 		case "/repos/GTNewHorizons/GT-New-Horizons-Modpack/releases":
 			writeJSON(t, w, []any{})
+		case "/service/rest/v1/search":
+			writeJSON(t, w, map[string]any{
+				"items": []any{map[string]any{"group": "com.github.GTNewHorizons", "version": "1.0.0"}},
+			})
 		default:
 			t.Fatalf("unexpected request path: %s", r.URL.Path)
 		}
@@ -1183,6 +1303,7 @@ func TestResolveLatest_GitHubPreferredOverMavenNoToken(t *testing.T) {
 }
 
 func TestResolveLatest_AuthFailsFallsBackToAnon(t *testing.T) {
+	maven.ResetGroupCache()
 	instanceDir := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(instanceDir, "mods"), 0o755); err != nil {
 		t.Fatalf("MkdirAll failed: %v", err)
@@ -1241,6 +1362,10 @@ func TestResolveLatest_AuthFailsFallsBackToAnon(t *testing.T) {
 			w.WriteHeader(http.StatusNotFound)
 		case "/repos/GTNewHorizons/GT-New-Horizons-Modpack/releases":
 			writeJSON(t, w, []any{})
+		case "/service/rest/v1/search":
+			writeJSON(t, w, map[string]any{
+				"items": []any{map[string]any{"group": "com.github.GTNewHorizons", "version": "1.0.0"}},
+			})
 		default:
 			t.Fatalf("unexpected request path: %s", r.URL.Path)
 		}
@@ -1268,6 +1393,7 @@ func TestResolveLatest_AuthFailsFallsBackToAnon(t *testing.T) {
 }
 
 func TestResolveLatest_GitHubUnreachableUsesMaven(t *testing.T) {
+	maven.ResetGroupCache()
 	instanceDir := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(instanceDir, "mods"), 0o755); err != nil {
 		t.Fatalf("MkdirAll failed: %v", err)
@@ -1319,6 +1445,10 @@ func TestResolveLatest_GitHubUnreachableUsesMaven(t *testing.T) {
 			w.WriteHeader(http.StatusNotFound)
 		case "/repos/GTNewHorizons/GT-New-Horizons-Modpack/releases":
 			w.WriteHeader(http.StatusInternalServerError)
+		case "/service/rest/v1/search":
+			writeJSON(t, w, map[string]any{
+				"items": []any{map[string]any{"group": "com.github.GTNewHorizons", "version": "1.0.0"}},
+			})
 		default:
 			t.Fatalf("unexpected request path: %s", r.URL.Path)
 		}
@@ -1342,6 +1472,7 @@ func TestResolveLatest_GitHubUnreachableUsesMaven(t *testing.T) {
 }
 
 func TestResolveLatest_GitHubOlderDoesNotConsultMaven(t *testing.T) {
+	maven.ResetGroupCache()
 	instanceDir := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(instanceDir, "mods"), 0o755); err != nil {
 		t.Fatalf("MkdirAll failed: %v", err)
@@ -1400,6 +1531,10 @@ func TestResolveLatest_GitHubOlderDoesNotConsultMaven(t *testing.T) {
 			w.WriteHeader(http.StatusNotFound)
 		case "/repos/GTNewHorizons/GT-New-Horizons-Modpack/releases":
 			writeJSON(t, w, []any{})
+		case "/service/rest/v1/search":
+			writeJSON(t, w, map[string]any{
+				"items": []any{map[string]any{"group": "com.github.GTNewHorizons", "version": "1.0.0"}},
+			})
 		default:
 			t.Fatalf("unexpected request path: %s", r.URL.Path)
 		}
