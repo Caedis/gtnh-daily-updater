@@ -60,17 +60,74 @@ func TestLatestStableVersion(t *testing.T) {
 	}
 }
 
+func TestSelectGroup(t *testing.T) {
+	tests := []struct {
+		name    string
+		items   []searchItem
+		want    string
+		wantErr bool
+	}{
+		{
+			name:  "single gtnh group",
+			items: []searchItem{{Group: "com.github.GTNewHorizons", Version: "1.0.0"}},
+			want:  "com.github.GTNewHorizons",
+		},
+		{
+			name:  "single non-gtnh group",
+			items: []searchItem{{Group: "tuhljin.automagy", Version: "0.29.7-GTNH"}},
+			want:  "tuhljin.automagy",
+		},
+		{
+			name: "prefers gtnh when multiple groups present",
+			items: []searchItem{
+				{Group: "tuhljin.automagy", Version: "9.9.9"},
+				{Group: "com.github.GTNewHorizons", Version: "0.0.1"},
+			},
+			want: "com.github.GTNewHorizons",
+		},
+		{
+			name: "no gtnh picks newest version group",
+			items: []searchItem{
+				{Group: "old.group", Version: "1.0.0"},
+				{Group: "new.group", Version: "2.0.0"},
+			},
+			want: "new.group",
+		},
+		{
+			name:    "empty items errors",
+			items:   nil,
+			wantErr: true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := selectGroup(tt.items, "Mod")
+			if tt.wantErr {
+				if err == nil {
+					t.Fatalf("expected error, got group=%q", got)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("selectGroup error: %v", err)
+			}
+			if got != tt.want {
+				t.Fatalf("selectGroup=%q want=%q", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestMetadataURL(t *testing.T) {
-	t.Run("escapes spaces", func(t *testing.T) {
-		got := MetadataURL("My Mod")
-		if !strings.Contains(got, "/My%20Mod/maven-metadata.xml") {
+	t.Run("gtnh group path and escaping", func(t *testing.T) {
+		got := metadataURL("com.github.GTNewHorizons", "My Mod")
+		if !strings.Contains(got, "/com/github/GTNewHorizons/My%20Mod/maven-metadata.xml") {
 			t.Fatalf("unexpected metadata URL: %s", got)
 		}
 	})
-
-	t.Run("escapes slashes", func(t *testing.T) {
-		got := MetadataURL("mod/name")
-		if !strings.Contains(got, "/mod%2Fname/maven-metadata.xml") {
+	t.Run("non-gtnh group path", func(t *testing.T) {
+		got := metadataURL("tuhljin.automagy", "Automagy-GTNH")
+		if !strings.Contains(got, "/tuhljin/automagy/Automagy-GTNH/maven-metadata.xml") {
 			t.Fatalf("unexpected metadata URL: %s", got)
 		}
 	})
@@ -114,14 +171,48 @@ func TestFetchMetadata(t *testing.T) {
 }
 
 func TestDownloadURL(t *testing.T) {
-	// Spaces are legal in filenames on all target platforms and are now
-	// preserved; the URL path components are percent-escaped separately.
-	url, filename := DownloadURL("My Mod", "1.2.3")
+	url, filename := downloadURL("tuhljin.automagy", "My Mod", "1.2.3")
 	if filename != "My Mod-1.2.3.jar" {
 		t.Fatalf("filename=%q want=%q", filename, "My Mod-1.2.3.jar")
 	}
-	if !strings.Contains(url, "/My%20Mod/1.2.3/My%20Mod-1.2.3.jar") {
+	if !strings.Contains(url, "/tuhljin/automagy/My%20Mod/1.2.3/My%20Mod-1.2.3.jar") {
 		t.Fatalf("unexpected url: %s", url)
+	}
+}
+
+func TestResolveGroup(t *testing.T) {
+	var hits int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits++
+		if r.URL.Query().Get("maven.artifactId") != "Automagy-GTNH" {
+			t.Fatalf("unexpected artifactId: %s", r.URL.RawQuery)
+		}
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"items":[{"group":"tuhljin.automagy","version":"0.29.7-GTNH"}]}`))
+	}))
+	defer server.Close()
+
+	oldClient, oldBase := HTTPClient, searchBase
+	HTTPClient = server.Client()
+	searchBase = server.URL
+	groupCacheMu.Lock()
+	groupCache = map[string]string{}
+	groupCacheMu.Unlock()
+	t.Cleanup(func() { HTTPClient, searchBase = oldClient, oldBase })
+
+	got, err := ResolveGroup(context.Background(), "Automagy-GTNH")
+	if err != nil {
+		t.Fatalf("ResolveGroup error: %v", err)
+	}
+	if got != "tuhljin.automagy" {
+		t.Fatalf("group=%q want=tuhljin.automagy", got)
+	}
+	// second call served from cache, no extra HTTP hit
+	if _, err := ResolveGroup(context.Background(), "Automagy-GTNH"); err != nil {
+		t.Fatalf("second ResolveGroup error: %v", err)
+	}
+	if hits != 1 {
+		t.Fatalf("server hits=%d want=1 (cache miss)", hits)
 	}
 }
 

@@ -2,20 +2,41 @@ package maven
 
 import (
 	"context"
+	"encoding/json"
 	"encoding/xml"
 	"fmt"
 	"net/http"
 	"net/url"
 	"path"
 	"strings"
+	"sync"
 
 	"github.com/caedis/gtnh-daily-updater/internal/fileutil"
 	"github.com/caedis/gtnh-daily-updater/internal/semver"
 )
 
-const BaseURL = "https://nexus.gtnewhorizons.com/repository/releases/com/github/GTNewHorizons/"
+const repoBase = "https://nexus.gtnewhorizons.com/repository/releases/"
+
+const gtnhGroup = "com.github.GTNewHorizons"
+
+// searchBase is the Nexus REST search endpoint; a var so tests can override it.
+var searchBase = "https://nexus.gtnewhorizons.com/service/rest/v1/search"
 
 var HTTPClient = http.DefaultClient
+
+var (
+	groupCacheMu sync.Mutex
+	groupCache   = map[string]string{}
+)
+
+type searchResponse struct {
+	Items []searchItem `json:"items"`
+}
+
+type searchItem struct {
+	Group   string `json:"group"`
+	Version string `json:"version"`
+}
 
 type metadata struct {
 	Versioning struct {
@@ -26,20 +47,102 @@ type metadata struct {
 	} `xml:"versioning"`
 }
 
-func MetadataURL(modName string) string {
-	return BaseURL + path.Join(url.PathEscape(modName), "maven-metadata.xml")
+func groupBaseURL(group string) string {
+	return repoBase + strings.ReplaceAll(group, ".", "/") + "/"
 }
 
-func DownloadURL(modName, version string) (dlURL, filename string) {
+func metadataURL(group, modName string) string {
+	return groupBaseURL(group) + path.Join(url.PathEscape(modName), "maven-metadata.xml")
+}
+
+func downloadURL(group, modName, version string) (dlURL, filename string) {
 	filename = MavenFilename(modName, version)
-	dlURL = BaseURL + url.PathEscape(modName) + "/" + url.PathEscape(version) + "/" + url.PathEscape(filename)
+	dlURL = groupBaseURL(group) + url.PathEscape(modName) + "/" + url.PathEscape(version) + "/" + url.PathEscape(filename)
 	return dlURL, filename
+}
+
+// DownloadURL resolves the mod's group and builds its jar download URL.
+func DownloadURL(ctx context.Context, modName, version string) (dlURL, filename string, err error) {
+	group, err := ResolveGroup(ctx, modName)
+	if err != nil {
+		return "", "", err
+	}
+	dlURL, filename = downloadURL(group, modName, version)
+	return dlURL, filename, nil
+}
+
+// ResolveGroup finds the Maven group for a mod via the Nexus search API,
+// preferring the GTNewHorizons group. Results are cached per mod name.
+func ResolveGroup(ctx context.Context, modName string) (string, error) {
+	groupCacheMu.Lock()
+	if g, ok := groupCache[modName]; ok {
+		groupCacheMu.Unlock()
+		return g, nil
+	}
+	groupCacheMu.Unlock()
+
+	g, err := searchGroup(ctx, modName)
+	if err != nil {
+		return "", err
+	}
+
+	groupCacheMu.Lock()
+	groupCache[modName] = g
+	groupCacheMu.Unlock()
+	return g, nil
+}
+
+func searchGroup(ctx context.Context, modName string) (string, error) {
+	u := searchBase + "?repository=releases&maven.artifactId=" + url.QueryEscape(modName)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
+	if err != nil {
+		return "", fmt.Errorf("creating Nexus search request: %w", err)
+	}
+	resp, err := HTTPClient.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("searching Nexus: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("searching Nexus for %s: HTTP %d", modName, resp.StatusCode)
+	}
+	var sr searchResponse
+	if err := json.NewDecoder(resp.Body).Decode(&sr); err != nil {
+		return "", fmt.Errorf("parsing Nexus search: %w", err)
+	}
+	return selectGroup(sr.Items, modName)
+}
+
+// selectGroup prefers the GTNewHorizons group; otherwise returns the group of
+// the newest-version item.
+func selectGroup(items []searchItem, modName string) (string, error) {
+	bestGroup, bestVer := "", ""
+	for _, it := range items {
+		g := strings.TrimSpace(it.Group)
+		if g == "" {
+			continue
+		}
+		if g == gtnhGroup {
+			return gtnhGroup, nil
+		}
+		if bestGroup == "" || semver.Compare(it.Version, bestVer) > 0 {
+			bestGroup, bestVer = g, it.Version
+		}
+	}
+	if bestGroup == "" {
+		return "", fmt.Errorf("no Nexus artifact found for %s", modName)
+	}
+	return bestGroup, nil
 }
 
 // LatestAnyVersion fetches Maven metadata for a mod and returns the latest
 // version including pre-releases.
 func LatestAnyVersion(ctx context.Context, modName string) (string, error) {
-	md, err := fetchMetadata(ctx, MetadataURL(modName))
+	group, err := ResolveGroup(ctx, modName)
+	if err != nil {
+		return "", err
+	}
+	md, err := fetchMetadata(ctx, metadataURL(group, modName))
 	if err != nil {
 		return "", err
 	}
@@ -67,7 +170,11 @@ func LatestAnyVersion(ctx context.Context, modName string) (string, error) {
 // LatestNonPreVersion fetches Maven metadata for a mod and returns the latest
 // stable (non "-pre") version.
 func LatestNonPreVersion(ctx context.Context, modName string) (string, error) {
-	md, err := fetchMetadata(ctx, MetadataURL(modName))
+	group, err := ResolveGroup(ctx, modName)
+	if err != nil {
+		return "", err
+	}
+	md, err := fetchMetadata(ctx, metadataURL(group, modName))
 	if err != nil {
 		return "", err
 	}
