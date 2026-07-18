@@ -99,6 +99,9 @@ func ResetGroupCache() {
 	groupCacheMu.Unlock()
 }
 
+// searchGroup finds a mod's Maven group via the Nexus search API. The Maven
+// fallback now depends on search availability. Only the first result page is
+// read; that is fine since all pages of one artifact share the same group.
 func searchGroup(ctx context.Context, modName string) (string, error) {
 	u := searchBase + "?repository=releases&maven.artifactId=" + url.QueryEscape(modName)
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
