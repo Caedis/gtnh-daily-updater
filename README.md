@@ -183,6 +183,18 @@ Add extra mods from Modrinth (pinned version):
 gtnh-daily-updater extra add SomeMod --source modrinth:slug-or-id/versionID
 ```
 
+CurseForge and Modrinth "latest" sources default to the release channel. Append
+`@beta` or `@alpha` to opt into less stable channels; a channel is cumulative,
+so `@beta` still picks a newer release over an older beta:
+
+```bash
+gtnh-daily-updater extra add jei --source curseforge:238222@beta
+gtnh-daily-updater extra add journeymap --source modrinth:journeymap@alpha
+```
+
+Channels do not apply to pinned sources (`curseforge:12345/67890`,
+`modrinth:slug/versionID`).
+
 Add extra mods from direct URL:
 
 ```bash

@@ -36,8 +36,10 @@ var extraAddCmd = &cobra.Command{
   - Default: looks up mod name in the GTNH assets database
   - --source github:Owner/Repo: downloads from GitHub releases
   - --source curseforge:12345: downloads latest release from CurseForge project
+  - --source curseforge:12345@beta: latest beta-or-newer file (channel: release, beta, alpha; default release)
   - --source curseforge:12345/67890: downloads a specific CurseForge file
   - --source modrinth:slug-or-id: downloads latest release from Modrinth
+  - --source modrinth:slug-or-id@beta: latest beta-or-newer version (channel: release, beta, alpha; default release)
   - --source modrinth:slug-or-id/versionID: downloads a specific Modrinth version
   - --source https://example.com/mod.jar: downloads from direct URL
 
