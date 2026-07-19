@@ -116,18 +116,22 @@ A same-name extra overrides the manifest entry — no need to exclude first.`,
 			}
 			logging.Infof("  Validated GitHub repo: %s\n", repo)
 		} else if rest, ok := strings.CutPrefix(spec.Source, "curseforge:"); ok {
-			// CurseForge source — validate format
-			projectID, fileID, err := curseforge.ParseSource(rest)
+			// CurseForge source, validate format
+			projectID, fileID, channel, err := curseforge.ParseSource(rest)
 			if err != nil {
 				return wrapUsageError(fmt.Errorf("invalid --source %q: %w", spec.Source, err))
 			}
 			if getCurseForgeKey() == "" {
-				logging.Infof("  Warning: CURSEFORGE_API_KEY not set — set it before running update\n")
+				logging.Infof("  Warning: CURSEFORGE_API_KEY not set, set it before running update\n")
 			}
 			if fileID != 0 {
 				logging.Infof("  CurseForge source: project %d, file %d (pinned)\n", projectID, fileID)
 			} else {
-				logging.Infof("  CurseForge source: project %d (latest release)\n", projectID)
+				ch := channel
+				if ch == "" {
+					ch = "release"
+				}
+				logging.Infof("  CurseForge source: project %d (latest, %s channel)\n", projectID, ch)
 			}
 		} else if rest, ok := strings.CutPrefix(spec.Source, "modrinth:"); ok {
 			project, versionID, err := modrinth.ParseSource(rest)
