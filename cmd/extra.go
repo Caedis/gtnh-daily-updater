@@ -134,7 +134,7 @@ A same-name extra overrides the manifest entry — no need to exclude first.`,
 				logging.Infof("  CurseForge source: project %d (latest, %s channel)\n", projectID, ch)
 			}
 		} else if rest, ok := strings.CutPrefix(spec.Source, "modrinth:"); ok {
-			project, versionID, err := modrinth.ParseSource(rest)
+			project, versionID, channel, err := modrinth.ParseSource(rest)
 			if err != nil {
 				return wrapUsageError(fmt.Errorf("invalid --source %q: %w", spec.Source, err))
 			}
@@ -148,7 +148,11 @@ A same-name extra overrides the manifest entry — no need to exclude first.`,
 			if versionID != "" {
 				logging.Infof("  Modrinth source: project %s, version %s (pinned)\n", project, versionID)
 			} else {
-				logging.Infof("  Modrinth source: project %s (latest release)\n", project)
+				ch := channel
+				if ch == "" {
+					ch = "release"
+				}
+				logging.Infof("  Modrinth source: project %s (latest, %s channel)\n", project, ch)
 			}
 		} else if strings.HasPrefix(spec.Source, "http://") || strings.HasPrefix(spec.Source, "https://") {
 			// Direct URL — just note it

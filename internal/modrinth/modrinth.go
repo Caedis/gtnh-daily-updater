@@ -6,7 +6,9 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"sort"
 	"strings"
+	"time"
 )
 
 // GTNHGameVersion is the Minecraft version GTNH targets.
@@ -53,32 +55,78 @@ type Version struct {
 	ProjectID     string   `json:"project_id"`
 	VersionNumber string   `json:"version_number"`
 	VersionType   string   `json:"version_type"` // release | beta | alpha
+	DatePublished string   `json:"date_published"`
 	Loaders       []string `json:"loaders"`
 	GameVersions  []string `json:"game_versions"`
 	Files         []File   `json:"files"`
 }
 
-// ParseSource parses the part of a modrinth source after the "modrinth:" prefix.
-// Accepted formats:
-//   - "slug-or-id"                 — use latest matching version
-//   - "slug-or-id/versionID"       — use that specific version
-func ParseSource(s string) (project, versionID string, err error) {
-	s = strings.TrimSpace(s)
-	if s == "" {
-		return "", "", fmt.Errorf("empty Modrinth source")
+// ParseChannel maps a release-channel name to the maximum version-type rank it
+// permits (release=1, beta=2, alpha=3). Empty defaults to release. Unknown names error.
+func ParseChannel(s string) (int, error) {
+	switch strings.ToLower(strings.TrimSpace(s)) {
+	case "", "release":
+		return 1, nil
+	case "beta":
+		return 2, nil
+	case "alpha":
+		return 3, nil
+	default:
+		return 0, fmt.Errorf("invalid Modrinth channel %q: must be release, beta, or alpha", s)
 	}
-	if proj, ver, hasVer := strings.Cut(s, "/"); hasVer {
-		if proj == "" || ver == "" {
-			return "", "", fmt.Errorf("invalid Modrinth source %q: expected slug[/versionID]", s)
-		}
-		return proj, ver, nil
-	}
-	return s, "", nil
 }
 
-// FetchLatestVersion returns the newest release version of a Modrinth project
-// that matches the given game version and loader.
-func FetchLatestVersion(ctx context.Context, project, gameVersion, loader string) (Version, error) {
+// versionTypeRank maps a Modrinth version_type to a stability rank. Unknown types
+// return 0 so they are excluded from channel filtering.
+func versionTypeRank(t string) int {
+	switch strings.ToLower(strings.TrimSpace(t)) {
+	case "release":
+		return 1
+	case "beta":
+		return 2
+	case "alpha":
+		return 3
+	default:
+		return 0
+	}
+}
+
+// ParseSource parses the part of a modrinth source after the "modrinth:" prefix.
+// Accepted formats:
+//   - "slug-or-id"            latest matching version, release channel
+//   - "slug-or-id@beta"       latest matching version in the given channel
+//   - "slug-or-id/versionID"  that specific version
+//
+// A "@channel" suffix cannot be combined with a pinned version ID.
+func ParseSource(s string) (project, versionID, channel string, err error) {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return "", "", "", fmt.Errorf("empty Modrinth source")
+	}
+	rest, chanPart, hasChannel := strings.Cut(s, "@")
+	if hasChannel {
+		if _, cerr := ParseChannel(chanPart); cerr != nil {
+			return "", "", "", cerr
+		}
+	}
+	if proj, ver, hasVer := strings.Cut(rest, "/"); hasVer {
+		if proj == "" || ver == "" {
+			return "", "", "", fmt.Errorf("invalid Modrinth source %q: expected slug[/versionID]", s)
+		}
+		if hasChannel {
+			return "", "", "", fmt.Errorf("channel %q cannot be combined with a pinned version ID", chanPart)
+		}
+		return proj, ver, "", nil
+	}
+	if rest == "" {
+		return "", "", "", fmt.Errorf("invalid Modrinth source %q: expected slug[/versionID]", s)
+	}
+	return rest, "", chanPart, nil
+}
+
+// FetchLatestVersion returns the newest version of a Modrinth project that
+// matches the given game version, loader, and channel (maxRank).
+func FetchLatestVersion(ctx context.Context, project, gameVersion, loader string, maxRank int) (Version, error) {
 	q := url.Values{}
 	if gameVersion != "" {
 		q.Set("game_versions", fmt.Sprintf("[%q]", gameVersion))
@@ -110,16 +158,32 @@ func FetchLatestVersion(ctx context.Context, project, gameVersion, loader string
 		return Version{}, fmt.Errorf("parsing Modrinth versions response: %w", err)
 	}
 
-	// Prefer release versions; fall back to first match if none.
+	// Keep versions within the requested channel: 1 <= rank <= maxRank.
+	var allowed []Version
 	for _, v := range versions {
-		if v.VersionType == "release" {
-			return v, nil
+		if r := versionTypeRank(v.VersionType); r >= 1 && r <= maxRank {
+			allowed = append(allowed, v)
 		}
 	}
-	if len(versions) > 0 {
-		return versions[0], nil
+	if len(allowed) == 0 {
+		return Version{}, fmt.Errorf("no versions found for Modrinth project %s within channel (gameVersion=%q loader=%q)", project, gameVersion, loader)
 	}
-	return Version{}, fmt.Errorf("no versions found for Modrinth project %s (gameVersion=%q loader=%q)", project, gameVersion, loader)
+
+	// Newest date_published wins. Stable sort keeps API order for equal/unparseable dates.
+	sort.SliceStable(allowed, func(i, j int) bool {
+		return publishedTime(allowed[i].DatePublished).After(publishedTime(allowed[j].DatePublished))
+	})
+	return allowed[0], nil
+}
+
+// publishedTime parses a Modrinth date_published stamp, returning the zero time
+// when empty or unparseable.
+func publishedTime(s string) time.Time {
+	t, err := time.Parse(time.RFC3339, s)
+	if err != nil {
+		return time.Time{}
+	}
+	return t
 }
 
 // FetchVersion returns a specific version by ID.

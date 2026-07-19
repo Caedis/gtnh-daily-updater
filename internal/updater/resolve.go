@@ -355,7 +355,7 @@ func resolveExtraMod(ctx context.Context, name string, spec config.ExtraModSpec,
 
 	case strings.HasPrefix(spec.Source, "modrinth:"):
 		rest := strings.TrimPrefix(spec.Source, "modrinth:")
-		project, versionID, err := modrinth.ParseSource(rest)
+		project, versionID, channel, err := modrinth.ParseSource(rest)
 		if err != nil {
 			return diff.ResolvedExtraMod{}, resolvedExtra{}, err
 		}
@@ -364,7 +364,8 @@ func resolveExtraMod(ctx context.Context, name string, spec config.ExtraModSpec,
 		if versionID != "" {
 			ver, err = modrinth.FetchVersion(ctx, versionID)
 		} else {
-			ver, err = modrinth.FetchLatestVersion(ctx, project, modrinth.GTNHGameVersion, modrinth.GTNHLoader)
+			maxRank, _ := modrinth.ParseChannel(channel) // already validated by ParseSource
+			ver, err = modrinth.FetchLatestVersion(ctx, project, modrinth.GTNHGameVersion, modrinth.GTNHLoader, maxRank)
 		}
 		if err != nil {
 			return diff.ResolvedExtraMod{}, resolvedExtra{}, err
