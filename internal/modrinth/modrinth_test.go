@@ -79,19 +79,15 @@ func TestParseSource(t *testing.T) {
 }
 
 func TestFetchLatestVersionChannel(t *testing.T) {
-	versions := []Version{
-		{ID: "beta-new", VersionType: "beta", DatePublished: "2026-03-01T00:00:00Z", Files: []File{{URL: "https://example.com/bn.jar", Filename: "bn.jar", Primary: true}}},
-		{ID: "release-old", VersionType: "release", DatePublished: "2026-02-01T00:00:00Z", Files: []File{{URL: "https://example.com/ro.jar", Filename: "ro.jar", Primary: true}}},
-		{ID: "release-new", VersionType: "release", DatePublished: "2026-02-15T00:00:00Z", Files: []File{{URL: "https://example.com/rn.jar", Filename: "rn.jar", Primary: true}}},
-		{ID: "alpha-newest", VersionType: "alpha", DatePublished: "2026-04-01T00:00:00Z", Files: []File{{URL: "https://example.com/an.jar", Filename: "an.jar", Primary: true}}},
-	}
+	// served is set per subtest so each case exercises its own version set.
+	var served []Version
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if !strings.Contains(r.URL.Path, "/v2/project/") {
 			http.Error(w, "bad path", http.StatusBadRequest)
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(versions)
+		_ = json.NewEncoder(w).Encode(served)
 	}))
 	defer srv.Close()
 
@@ -99,17 +95,24 @@ func TestFetchLatestVersionChannel(t *testing.T) {
 	baseURL, httpClient = srv.URL, srv.Client()
 	defer func() { baseURL, httpClient = oldBase, oldClient }()
 
+	ver := func(id, vtype, date string) Version {
+		return Version{ID: id, VersionType: vtype, DatePublished: date, Files: []File{{URL: "https://example.com/" + id + ".jar", Filename: id + ".jar", Primary: true}}}
+	}
+
 	tests := []struct {
-		name    string
-		maxRank int
-		wantID  string
+		name     string
+		maxRank  int
+		versions []Version
+		wantID   string
 	}{
-		{name: "release picks newest release", maxRank: 1, wantID: "release-new"},
-		{name: "beta picks newest beta over releases", maxRank: 2, wantID: "beta-new"},
-		{name: "alpha picks newest alpha", maxRank: 3, wantID: "alpha-newest"},
+		{name: "release picks newest release", maxRank: 1, versions: []Version{ver("r-old", "release", "2026-02-01T00:00:00Z"), ver("r-new", "release", "2026-02-15T00:00:00Z")}, wantID: "r-new"},
+		{name: "beta picks newest beta when it is newest", maxRank: 2, versions: []Version{ver("r-old", "release", "2026-02-01T00:00:00Z"), ver("b-new", "beta", "2026-03-01T00:00:00Z")}, wantID: "b-new"},
+		{name: "beta picks newer release over older beta", maxRank: 2, versions: []Version{ver("b-old", "beta", "2026-02-01T00:00:00Z"), ver("r-new", "release", "2026-03-15T00:00:00Z")}, wantID: "r-new"},
+		{name: "alpha picks newest alpha", maxRank: 3, versions: []Version{ver("b-new", "beta", "2026-03-01T00:00:00Z"), ver("a-new", "alpha", "2026-04-01T00:00:00Z")}, wantID: "a-new"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			served = tt.versions
 			v, err := FetchLatestVersion(context.Background(), "journeymap", "", "", tt.maxRank)
 			if err != nil {
 				t.Fatalf("FetchLatestVersion error: %v", err)

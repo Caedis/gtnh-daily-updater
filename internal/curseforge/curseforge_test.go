@@ -119,19 +119,15 @@ func TestFetchLatestFilePrefersNewestRelease(t *testing.T) {
 }
 
 func TestFetchLatestFileChannel(t *testing.T) {
-	files := []File{
-		{ID: 100, ReleaseType: 3, FileName: "alpha.jar", DownloadURL: "https://example.com/alpha.jar"},
-		{ID: 200, ReleaseType: 2, FileName: "old-beta.jar", DownloadURL: "https://example.com/old-beta.jar"},
-		{ID: 300, ReleaseType: 1, FileName: "release.jar", DownloadURL: "https://example.com/release.jar"},
-		{ID: 400, ReleaseType: 2, FileName: "new-beta.jar", DownloadURL: "https://example.com/new-beta.jar"},
-	}
+	// served is set per subtest so each case exercises its own file set.
+	var served []File
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Header.Get("x-api-key") == "" {
 			w.WriteHeader(http.StatusForbidden)
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(filesResponse{Data: files})
+		_ = json.NewEncoder(w).Encode(filesResponse{Data: served})
 	}))
 	defer srv.Close()
 
@@ -139,17 +135,29 @@ func TestFetchLatestFileChannel(t *testing.T) {
 	baseURL, httpClient = srv.URL, srv.Client()
 	defer func() { baseURL, httpClient = oldBase, oldClient }()
 
+	file := func(id, relType int) File {
+		return File{ID: id, ReleaseType: relType, FileName: "mod.jar", DownloadURL: "https://example.com/mod.jar"}
+	}
+	const (
+		release = 1
+		beta    = 2
+		alpha   = 3
+	)
+
 	tests := []struct {
 		name   string
 		maxTyp int
+		files  []File
 		wantID int
 	}{
-		{name: "release excludes betas", maxTyp: 1, wantID: 300},
-		{name: "beta picks newest beta over older release", maxTyp: 2, wantID: 400},
-		{name: "alpha still picks newest beta", maxTyp: 3, wantID: 400},
+		{name: "release excludes betas", maxTyp: 1, files: []File{file(300, release), file(400, beta)}, wantID: 300},
+		{name: "beta picks newest beta when it is newest", maxTyp: 2, files: []File{file(300, release), file(400, beta)}, wantID: 400},
+		{name: "beta picks newer release over older beta", maxTyp: 2, files: []File{file(400, beta), file(500, release)}, wantID: 500},
+		{name: "alpha picks newest alpha", maxTyp: 3, files: []File{file(400, beta), file(600, alpha)}, wantID: 600},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			served = tt.files
 			f, err := FetchLatestFile(context.Background(), 238222, "", "key", tt.maxTyp)
 			if err != nil {
 				t.Fatalf("FetchLatestFile error: %v", err)
