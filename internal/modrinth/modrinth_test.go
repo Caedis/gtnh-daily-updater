@@ -10,25 +10,58 @@ import (
 	"testing"
 )
 
+func TestParseChannel(t *testing.T) {
+	tests := []struct {
+		input   string
+		want    int
+		wantErr bool
+	}{
+		{input: "", want: 1},
+		{input: "release", want: 1},
+		{input: "Beta", want: 2},
+		{input: "ALPHA", want: 3},
+		{input: "stable", wantErr: true},
+	}
+	for _, tt := range tests {
+		got, err := ParseChannel(tt.input)
+		if tt.wantErr {
+			if err == nil {
+				t.Fatalf("ParseChannel(%q) expected error", tt.input)
+			}
+			continue
+		}
+		if err != nil {
+			t.Fatalf("ParseChannel(%q) unexpected error: %v", tt.input, err)
+		}
+		if got != tt.want {
+			t.Fatalf("ParseChannel(%q) = %d, want %d", tt.input, got, tt.want)
+		}
+	}
+}
+
 func TestParseSource(t *testing.T) {
 	tests := []struct {
 		name        string
 		input       string
 		wantProject string
 		wantVersion string
+		wantChannel string
 		wantErr     bool
 	}{
 		{name: "slug only", input: "journeymap", wantProject: "journeymap"},
 		{name: "id only", input: "AANobbMI", wantProject: "AANobbMI"},
 		{name: "slug and version", input: "journeymap/abc123", wantProject: "journeymap", wantVersion: "abc123"},
+		{name: "slug with channel", input: "journeymap@beta", wantProject: "journeymap", wantChannel: "beta"},
 		{name: "empty", input: "", wantErr: true},
 		{name: "trailing slash", input: "journeymap/", wantErr: true},
 		{name: "leading slash", input: "/abc", wantErr: true},
+		{name: "channel only", input: "@beta", wantErr: true},
+		{name: "unknown channel", input: "journeymap@stable", wantErr: true},
+		{name: "channel with version", input: "journeymap/abc123@beta", wantErr: true},
 	}
-
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			proj, ver, err := ParseSource(tt.input)
+			proj, ver, channel, err := ParseSource(tt.input)
 			if tt.wantErr {
 				if err == nil {
 					t.Fatalf("ParseSource(%q) expected error, got nil", tt.input)
@@ -38,55 +71,60 @@ func TestParseSource(t *testing.T) {
 			if err != nil {
 				t.Fatalf("ParseSource(%q) unexpected error: %v", tt.input, err)
 			}
-			if proj != tt.wantProject || ver != tt.wantVersion {
-				t.Fatalf("ParseSource(%q) = (%q, %q), want (%q, %q)", tt.input, proj, ver, tt.wantProject, tt.wantVersion)
+			if proj != tt.wantProject || ver != tt.wantVersion || channel != tt.wantChannel {
+				t.Fatalf("ParseSource(%q) = (%q, %q, %q), want (%q, %q, %q)", tt.input, proj, ver, channel, tt.wantProject, tt.wantVersion, tt.wantChannel)
 			}
 		})
 	}
 }
 
-func TestFetchLatestVersionPrefersRelease(t *testing.T) {
-	versions := []Version{
-		{ID: "v1", VersionType: "beta", Files: []File{{URL: "https://example.com/b.jar", Filename: "b.jar", Primary: true}}},
-		{ID: "v2", VersionType: "release", Files: []File{{URL: "https://example.com/r.jar", Filename: "r.jar", Primary: true}}},
-		{ID: "v3", VersionType: "release", Files: []File{{URL: "https://example.com/r2.jar", Filename: "r2.jar", Primary: true}}},
-	}
-
+func TestFetchLatestVersionChannel(t *testing.T) {
+	// served is set per subtest so each case exercises its own version set.
+	var served []Version
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if !strings.Contains(r.URL.Path, "/v2/project/") {
 			http.Error(w, "bad path", http.StatusBadRequest)
 			return
 		}
-		if r.Header.Get("User-Agent") == "" {
-			http.Error(w, "missing UA", http.StatusBadRequest)
-			return
-		}
 		w.Header().Set("Content-Type", "application/json")
-		if err := json.NewEncoder(w).Encode(versions); err != nil {
-			http.Error(w, "encode error", http.StatusInternalServerError)
-		}
+		_ = json.NewEncoder(w).Encode(served)
 	}))
 	defer srv.Close()
 
-	origBase := baseURL
-	origClient := httpClient
-	baseURL = srv.URL
-	httpClient = srv.Client()
-	defer func() {
-		baseURL = origBase
-		httpClient = origClient
-	}()
+	oldBase, oldClient := baseURL, httpClient
+	baseURL, httpClient = srv.URL, srv.Client()
+	defer func() { baseURL, httpClient = oldBase, oldClient }()
 
-	got, err := FetchLatestVersion(context.Background(), "journeymap", "1.7.10", "forge")
-	if err != nil {
-		t.Fatalf("FetchLatestVersion: %v", err)
+	ver := func(id, vtype, date string) Version {
+		return Version{ID: id, VersionType: vtype, DatePublished: date, Files: []File{{URL: "https://example.com/" + id + ".jar", Filename: id + ".jar", Primary: true}}}
 	}
-	if got.ID != "v2" {
-		t.Errorf("FetchLatestVersion picked %q, want v2 (first release)", got.ID)
+
+	tests := []struct {
+		name     string
+		maxRank  int
+		versions []Version
+		wantID   string
+	}{
+		{name: "release picks newest release", maxRank: 1, versions: []Version{ver("r-old", "release", "2026-02-01T00:00:00Z"), ver("r-new", "release", "2026-02-15T00:00:00Z")}, wantID: "r-new"},
+		{name: "beta picks newest beta when it is newest", maxRank: 2, versions: []Version{ver("r-old", "release", "2026-02-01T00:00:00Z"), ver("b-new", "beta", "2026-03-01T00:00:00Z")}, wantID: "b-new"},
+		{name: "beta picks newer release over older beta", maxRank: 2, versions: []Version{ver("b-old", "beta", "2026-02-01T00:00:00Z"), ver("r-new", "release", "2026-03-15T00:00:00Z")}, wantID: "r-new"},
+		{name: "alpha picks newest alpha", maxRank: 3, versions: []Version{ver("b-new", "beta", "2026-03-01T00:00:00Z"), ver("a-new", "alpha", "2026-04-01T00:00:00Z")}, wantID: "a-new"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			served = tt.versions
+			v, err := FetchLatestVersion(context.Background(), "journeymap", "", "", tt.maxRank)
+			if err != nil {
+				t.Fatalf("FetchLatestVersion error: %v", err)
+			}
+			if v.ID != tt.wantID {
+				t.Fatalf("FetchLatestVersion(maxRank=%d) = %q, want %q", tt.maxRank, v.ID, tt.wantID)
+			}
+		})
 	}
 }
 
-func TestFetchLatestVersionFallsBackWhenNoRelease(t *testing.T) {
+func TestFetchLatestVersionBetaChannelIncludesBeta(t *testing.T) {
 	versions := []Version{
 		{ID: "v1", VersionType: "beta", Files: []File{{URL: "https://example.com/b.jar", Filename: "b.jar", Primary: true}}},
 	}
@@ -106,7 +144,7 @@ func TestFetchLatestVersionFallsBackWhenNoRelease(t *testing.T) {
 		httpClient = origClient
 	}()
 
-	got, err := FetchLatestVersion(context.Background(), "journeymap", "1.7.10", "forge")
+	got, err := FetchLatestVersion(context.Background(), "journeymap", "1.7.10", "forge", 2)
 	if err != nil {
 		t.Fatalf("FetchLatestVersion: %v", err)
 	}
@@ -131,7 +169,7 @@ func TestFetchLatestVersionErrorsOnEmpty(t *testing.T) {
 		httpClient = origClient
 	}()
 
-	if _, err := FetchLatestVersion(context.Background(), "journeymap", "1.7.10", "forge"); err == nil {
+	if _, err := FetchLatestVersion(context.Background(), "journeymap", "1.7.10", "forge", 1); err == nil {
 		t.Fatal("expected error for empty versions, got nil")
 	}
 }

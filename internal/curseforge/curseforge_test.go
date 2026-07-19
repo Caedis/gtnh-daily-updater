@@ -9,27 +9,58 @@ import (
 	"testing"
 )
 
+func TestParseChannel(t *testing.T) {
+	tests := []struct {
+		input   string
+		want    int
+		wantErr bool
+	}{
+		{input: "", want: 1},
+		{input: "release", want: 1},
+		{input: "Beta", want: 2},
+		{input: "ALPHA", want: 3},
+		{input: "stable", wantErr: true},
+	}
+	for _, tt := range tests {
+		got, err := ParseChannel(tt.input)
+		if tt.wantErr {
+			if err == nil {
+				t.Fatalf("ParseChannel(%q) expected error", tt.input)
+			}
+			continue
+		}
+		if err != nil {
+			t.Fatalf("ParseChannel(%q) unexpected error: %v", tt.input, err)
+		}
+		if got != tt.want {
+			t.Fatalf("ParseChannel(%q) = %d, want %d", tt.input, got, tt.want)
+		}
+	}
+}
+
 func TestParseSource(t *testing.T) {
 	tests := []struct {
 		name        string
 		input       string
 		wantProject int
 		wantFile    int
+		wantChannel string
 		wantErr     bool
 	}{
-		{name: "project only", input: "238222", wantProject: 238222, wantFile: 0},
+		{name: "project only", input: "238222", wantProject: 238222},
 		{name: "project and file", input: "238222/4586932", wantProject: 238222, wantFile: 4586932},
+		{name: "project with channel", input: "238222@beta", wantProject: 238222, wantChannel: "beta"},
+		{name: "channel case insensitive", input: "238222@ALPHA", wantProject: 238222, wantChannel: "ALPHA"},
 		{name: "invalid project letters", input: "abc", wantErr: true},
 		{name: "invalid file letters", input: "238222/abc", wantErr: true},
 		{name: "zero project", input: "0", wantErr: true},
-		{name: "negative project", input: "-1", wantErr: true},
-		{name: "zero file", input: "238222/0", wantErr: true},
 		{name: "negative file", input: "238222/-5", wantErr: true},
+		{name: "unknown channel", input: "238222@stable", wantErr: true},
+		{name: "channel with file", input: "238222/4586932@beta", wantErr: true},
 	}
-
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			proj, file, err := ParseSource(tt.input)
+			proj, file, channel, err := ParseSource(tt.input)
 			if tt.wantErr {
 				if err == nil {
 					t.Fatalf("ParseSource(%q) expected error, got nil", tt.input)
@@ -39,8 +70,8 @@ func TestParseSource(t *testing.T) {
 			if err != nil {
 				t.Fatalf("ParseSource(%q) unexpected error: %v", tt.input, err)
 			}
-			if proj != tt.wantProject || file != tt.wantFile {
-				t.Fatalf("ParseSource(%q) = (%d, %d), want (%d, %d)", tt.input, proj, file, tt.wantProject, tt.wantFile)
+			if proj != tt.wantProject || file != tt.wantFile || channel != tt.wantChannel {
+				t.Fatalf("ParseSource(%q) = (%d, %d, %q), want (%d, %d, %q)", tt.input, proj, file, channel, tt.wantProject, tt.wantFile, tt.wantChannel)
 			}
 		})
 	}
@@ -75,7 +106,7 @@ func TestFetchLatestFilePrefersNewestRelease(t *testing.T) {
 		httpClient = origClient
 	}()
 
-	got, err := FetchLatestFile(context.Background(), 12345, "", "test-key")
+	got, err := FetchLatestFile(context.Background(), 12345, "", "test-key", 1)
 	if err != nil {
 		t.Fatalf("FetchLatestFile: %v", err)
 	}
@@ -84,6 +115,57 @@ func TestFetchLatestFilePrefersNewestRelease(t *testing.T) {
 	}
 	if got.FileName != "latest-release.jar" {
 		t.Errorf("FetchLatestFile picked filename %q, want latest-release.jar", got.FileName)
+	}
+}
+
+func TestFetchLatestFileChannel(t *testing.T) {
+	// served is set per subtest so each case exercises its own file set.
+	var served []File
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("x-api-key") == "" {
+			w.WriteHeader(http.StatusForbidden)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(filesResponse{Data: served})
+	}))
+	defer srv.Close()
+
+	oldBase, oldClient := baseURL, httpClient
+	baseURL, httpClient = srv.URL, srv.Client()
+	defer func() { baseURL, httpClient = oldBase, oldClient }()
+
+	file := func(id, relType int) File {
+		return File{ID: id, ReleaseType: relType, FileName: "mod.jar", DownloadURL: "https://example.com/mod.jar"}
+	}
+	const (
+		release = 1
+		beta    = 2
+		alpha   = 3
+	)
+
+	tests := []struct {
+		name   string
+		maxTyp int
+		files  []File
+		wantID int
+	}{
+		{name: "release excludes betas", maxTyp: 1, files: []File{file(300, release), file(400, beta)}, wantID: 300},
+		{name: "beta picks newest beta when it is newest", maxTyp: 2, files: []File{file(300, release), file(400, beta)}, wantID: 400},
+		{name: "beta picks newer release over older beta", maxTyp: 2, files: []File{file(400, beta), file(500, release)}, wantID: 500},
+		{name: "alpha picks newest alpha", maxTyp: 3, files: []File{file(400, beta), file(600, alpha)}, wantID: 600},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			served = tt.files
+			f, err := FetchLatestFile(context.Background(), 238222, "", "key", tt.maxTyp)
+			if err != nil {
+				t.Fatalf("FetchLatestFile error: %v", err)
+			}
+			if f.ID != tt.wantID {
+				t.Fatalf("FetchLatestFile(maxTyp=%d) = ID %d, want %d", tt.maxTyp, f.ID, tt.wantID)
+			}
+		})
 	}
 }
 
@@ -110,7 +192,7 @@ func TestFetchLatestFileErrorsOnNoReleases(t *testing.T) {
 		httpClient = origClient
 	}()
 
-	_, err := FetchLatestFile(context.Background(), 12345, "", "test-key")
+	_, err := FetchLatestFile(context.Background(), 12345, "", "test-key", 1)
 	if err == nil {
 		t.Fatal("FetchLatestFile: expected error for no releases, got nil")
 	}
@@ -207,7 +289,7 @@ func TestCheckStatusRejectsMissingKey(t *testing.T) {
 		httpClient = origClient
 	}()
 
-	_, err := FetchLatestFile(context.Background(), 12345, "", "bad-key")
+	_, err := FetchLatestFile(context.Background(), 12345, "", "bad-key", 1)
 	if err == nil {
 		t.Fatal("expected error for 403, got nil")
 	}

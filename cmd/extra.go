@@ -36,8 +36,10 @@ var extraAddCmd = &cobra.Command{
   - Default: looks up mod name in the GTNH assets database
   - --source github:Owner/Repo: downloads from GitHub releases
   - --source curseforge:12345: downloads latest release from CurseForge project
+  - --source curseforge:12345@beta: latest beta-or-newer file (channel: release, beta, alpha; default release)
   - --source curseforge:12345/67890: downloads a specific CurseForge file
   - --source modrinth:slug-or-id: downloads latest release from Modrinth
+  - --source modrinth:slug-or-id@beta: latest beta-or-newer version (channel: release, beta, alpha; default release)
   - --source modrinth:slug-or-id/versionID: downloads a specific Modrinth version
   - --source https://example.com/mod.jar: downloads from direct URL
 
@@ -116,21 +118,25 @@ A same-name extra overrides the manifest entry — no need to exclude first.`,
 			}
 			logging.Infof("  Validated GitHub repo: %s\n", repo)
 		} else if rest, ok := strings.CutPrefix(spec.Source, "curseforge:"); ok {
-			// CurseForge source — validate format
-			projectID, fileID, err := curseforge.ParseSource(rest)
+			// CurseForge source, validate format
+			projectID, fileID, channel, err := curseforge.ParseSource(rest)
 			if err != nil {
 				return wrapUsageError(fmt.Errorf("invalid --source %q: %w", spec.Source, err))
 			}
 			if getCurseForgeKey() == "" {
-				logging.Infof("  Warning: CURSEFORGE_API_KEY not set — set it before running update\n")
+				logging.Infof("  Warning: CURSEFORGE_API_KEY not set, set it before running update\n")
 			}
 			if fileID != 0 {
 				logging.Infof("  CurseForge source: project %d, file %d (pinned)\n", projectID, fileID)
 			} else {
-				logging.Infof("  CurseForge source: project %d (latest release)\n", projectID)
+				ch := channel
+				if ch == "" {
+					ch = "release"
+				}
+				logging.Infof("  CurseForge source: project %d (latest, %s channel)\n", projectID, ch)
 			}
 		} else if rest, ok := strings.CutPrefix(spec.Source, "modrinth:"); ok {
-			project, versionID, err := modrinth.ParseSource(rest)
+			project, versionID, channel, err := modrinth.ParseSource(rest)
 			if err != nil {
 				return wrapUsageError(fmt.Errorf("invalid --source %q: %w", spec.Source, err))
 			}
@@ -144,7 +150,11 @@ A same-name extra overrides the manifest entry — no need to exclude first.`,
 			if versionID != "" {
 				logging.Infof("  Modrinth source: project %s, version %s (pinned)\n", project, versionID)
 			} else {
-				logging.Infof("  Modrinth source: project %s (latest release)\n", project)
+				ch := channel
+				if ch == "" {
+					ch = "release"
+				}
+				logging.Infof("  Modrinth source: project %s (latest, %s channel)\n", project, ch)
 			}
 		} else if strings.HasPrefix(spec.Source, "http://") || strings.HasPrefix(spec.Source, "https://") {
 			// Direct URL — just note it

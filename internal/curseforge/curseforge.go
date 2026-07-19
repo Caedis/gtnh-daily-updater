@@ -60,35 +60,62 @@ type downloadURLResponse struct {
 	Data string `json:"data"`
 }
 
+// ParseChannel maps a release-channel name to the maximum CurseForge releaseType
+// it permits (1=Release, 2=Beta, 3=Alpha). Empty defaults to release. Unknown
+// names error.
+func ParseChannel(s string) (int, error) {
+	switch strings.ToLower(strings.TrimSpace(s)) {
+	case "", "release":
+		return 1, nil
+	case "beta":
+		return 2, nil
+	case "alpha":
+		return 3, nil
+	default:
+		return 0, fmt.Errorf("invalid CurseForge channel %q: must be release, beta, or alpha", s)
+	}
+}
+
 // ParseSource parses the part of a curseforge source after the "curseforge:" prefix.
 // Accepted formats:
-//   - "12345"       — project ID, use latest release file
-//   - "12345/67890" — project ID + file ID, use that specific file
+//   - "12345"            project ID, latest release-channel file
+//   - "12345@beta"       project ID, latest file in the given channel
+//   - "12345/67890"      project ID + file ID, that specific file
 //
-// Returns projectID, fileID (0 if not specified), and an error.
-func ParseSource(s string) (projectID, fileID int, err error) {
-	if projStr, fileStr, hasFile := strings.Cut(s, "/"); hasFile {
+// A "@channel" suffix cannot be combined with a pinned file ID. Returns
+// projectID, fileID (0 if not specified), channel ("" when none given), and an error.
+func ParseSource(s string) (projectID, fileID int, channel string, err error) {
+	rest, chanPart, hasChannel := strings.Cut(s, "@")
+	if hasChannel {
+		if _, cerr := ParseChannel(chanPart); cerr != nil {
+			return 0, 0, "", cerr
+		}
+	}
+	if projStr, fileStr, hasFile := strings.Cut(rest, "/"); hasFile {
+		if hasChannel {
+			return 0, 0, "", fmt.Errorf("channel %q cannot be combined with a pinned file ID", chanPart)
+		}
 		projectID, err = strconv.Atoi(projStr)
 		if err != nil || projectID <= 0 {
-			return 0, 0, fmt.Errorf("invalid CurseForge project ID %q: must be a positive integer", projStr)
+			return 0, 0, "", fmt.Errorf("invalid CurseForge project ID %q: must be a positive integer", projStr)
 		}
 		fileID, err = strconv.Atoi(fileStr)
 		if err != nil || fileID <= 0 {
-			return 0, 0, fmt.Errorf("invalid CurseForge file ID %q: must be a positive integer", fileStr)
+			return 0, 0, "", fmt.Errorf("invalid CurseForge file ID %q: must be a positive integer", fileStr)
 		}
-		return projectID, fileID, nil
+		return projectID, fileID, "", nil
 	}
-	projectID, err = strconv.Atoi(s)
+	projectID, err = strconv.Atoi(rest)
 	if err != nil || projectID <= 0 {
-		return 0, 0, fmt.Errorf("invalid CurseForge project ID %q: must be a positive integer", s)
+		return 0, 0, "", fmt.Errorf("invalid CurseForge project ID %q: must be a positive integer", rest)
 	}
-	return projectID, 0, nil
+	return projectID, 0, chanPart, nil
 }
 
 // FetchLatestFile returns the latest release file for a CurseForge project.
 // If gameVersion is non-empty, only files tagged for that game version are considered.
 // The returned File's ID can be used as a stable version identifier.
-func FetchLatestFile(ctx context.Context, projectID int, gameVersion, apiKey string) (File, error) {
+func FetchLatestFile(ctx context.Context, projectID int, gameVersion, apiKey string, maxReleaseType int) (File, error) {
 	endpoint := fmt.Sprintf("%s/v1/mods/%d/files", baseURL, projectID)
 	if gameVersion != "" {
 		endpoint += "?" + url.Values{"gameVersion": {gameVersion}}.Encode()
@@ -113,22 +140,22 @@ func FetchLatestFile(ctx context.Context, projectID int, gameVersion, apiKey str
 		return File{}, fmt.Errorf("parsing CurseForge files response: %w", err)
 	}
 
-	// Keep release-type files only (ReleaseType 1 = Release)
-	var releases []File
+	// Keep files within the requested channel: 1 <= releaseType <= maxReleaseType.
+	var allowed []File
 	for _, f := range result.Data {
-		if f.ReleaseType == 1 {
-			releases = append(releases, f)
+		if f.ReleaseType >= 1 && f.ReleaseType <= maxReleaseType {
+			allowed = append(allowed, f)
 		}
 	}
-	if len(releases) == 0 {
-		return File{}, fmt.Errorf("no release files found for CurseForge project %d (gameVersion=%q)", projectID, gameVersion)
+	if len(allowed) == 0 {
+		return File{}, fmt.Errorf("no files found for CurseForge project %d within channel (gameVersion=%q)", projectID, gameVersion)
 	}
 
 	// Highest file ID = most recently uploaded
-	sort.Slice(releases, func(i, j int) bool {
-		return releases[i].ID > releases[j].ID
+	sort.Slice(allowed, func(i, j int) bool {
+		return allowed[i].ID > allowed[j].ID
 	})
-	return releases[0], nil
+	return allowed[0], nil
 }
 
 // FetchFile returns a specific file from a CurseForge project.

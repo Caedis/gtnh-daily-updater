@@ -323,7 +323,7 @@ func resolveExtraMod(ctx context.Context, name string, spec config.ExtraModSpec,
 			return diff.ResolvedExtraMod{}, resolvedExtra{}, fmt.Errorf("CURSEFORGE_API_KEY is required for CurseForge mods (set via env or --curseforge-key)")
 		}
 		rest := strings.TrimPrefix(spec.Source, "curseforge:")
-		projectID, fileID, err := curseforge.ParseSource(rest)
+		projectID, fileID, channel, err := curseforge.ParseSource(rest)
 		if err != nil {
 			return diff.ResolvedExtraMod{}, resolvedExtra{}, err
 		}
@@ -332,7 +332,8 @@ func resolveExtraMod(ctx context.Context, name string, spec config.ExtraModSpec,
 		if fileID != 0 {
 			file, err = curseforge.FetchFile(ctx, projectID, fileID, curseforgeKey)
 		} else {
-			file, err = curseforge.FetchLatestFile(ctx, projectID, curseforge.GTNHGameVersion, curseforgeKey)
+			maxType, _ := curseforge.ParseChannel(channel) // already validated by ParseSource
+			file, err = curseforge.FetchLatestFile(ctx, projectID, curseforge.GTNHGameVersion, curseforgeKey, maxType)
 		}
 		if err != nil {
 			return diff.ResolvedExtraMod{}, resolvedExtra{}, err
@@ -354,7 +355,7 @@ func resolveExtraMod(ctx context.Context, name string, spec config.ExtraModSpec,
 
 	case strings.HasPrefix(spec.Source, "modrinth:"):
 		rest := strings.TrimPrefix(spec.Source, "modrinth:")
-		project, versionID, err := modrinth.ParseSource(rest)
+		project, versionID, channel, err := modrinth.ParseSource(rest)
 		if err != nil {
 			return diff.ResolvedExtraMod{}, resolvedExtra{}, err
 		}
@@ -363,7 +364,8 @@ func resolveExtraMod(ctx context.Context, name string, spec config.ExtraModSpec,
 		if versionID != "" {
 			ver, err = modrinth.FetchVersion(ctx, versionID)
 		} else {
-			ver, err = modrinth.FetchLatestVersion(ctx, project, modrinth.GTNHGameVersion, modrinth.GTNHLoader)
+			maxRank, _ := modrinth.ParseChannel(channel) // already validated by ParseSource
+			ver, err = modrinth.FetchLatestVersion(ctx, project, modrinth.GTNHGameVersion, modrinth.GTNHLoader, maxRank)
 		}
 		if err != nil {
 			return diff.ResolvedExtraMod{}, resolvedExtra{}, err
