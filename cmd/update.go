@@ -40,11 +40,7 @@ var updateCmd = &cobra.Command{
 			return err
 		}
 
-		if result.OldVersion == result.NewVersion && !force {
-			return nil
-		}
-
-		if dryRun {
+		if result.UpToDate || dryRun {
 			return nil
 		}
 

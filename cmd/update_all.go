@@ -126,7 +126,7 @@ var updateAllCmd = &cobra.Command{
 				continue
 			}
 
-			if dryRunAll || (res.Added == 0 && res.Removed == 0 && res.Updated == 0 && res.OldVersion == res.NewVersion && !forceAll) {
+			if dryRunAll || res.UpToDate {
 				continue
 			}
 

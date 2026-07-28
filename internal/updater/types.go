@@ -39,6 +39,10 @@ type UpdateResult struct {
 	ConfigUpdated bool
 	ConfigSkipped bool
 	Skipped       []string
+	// UpToDate is set when Run exited early because nothing needed doing.
+	// Callers use it to decide whether to print a summary, instead of
+	// re-deriving the condition from the version fields.
+	UpToDate bool
 }
 
 // resolvedExtra holds download info for an extra mod resolved before download.
