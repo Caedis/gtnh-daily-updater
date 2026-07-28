@@ -83,6 +83,7 @@ func Run(ctx context.Context, opts Options) (*UpdateResult, error) {
 	}
 
 	if !opts.Force && !opts.DryRun && result.Added == 0 && result.Removed == 0 && result.Updated == 0 && state.ConfigVersion == effectiveConfigVersion {
+		result.UpToDate = true
 		logging.Infoln("Already up to date.")
 		return result, nil
 	}
