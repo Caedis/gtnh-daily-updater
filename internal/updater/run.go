@@ -84,6 +84,7 @@ func Run(ctx context.Context, opts Options) (*UpdateResult, error) {
 
 	if !opts.Force && !opts.DryRun && result.Added == 0 && result.Removed == 0 && result.Updated == 0 && state.ConfigVersion == effectiveConfigVersion {
 		result.UpToDate = true
+		stampVersionIfNeeded(opts.InstanceDir, gameDir, m, db, mode, effectiveConfigVersion, opts, result)
 		logging.Infoln("Already up to date.")
 		return result, nil
 	}
@@ -121,6 +122,8 @@ func Run(ctx context.Context, opts Options) (*UpdateResult, error) {
 	if err := snapshotAndUpdateConfigsIfNeeded(ctx, state, gameDir, result, rollback, effectiveConfigVersion); err != nil {
 		return nil, err
 	}
+	// After the config merge, which restores the pack's default version lines.
+	stampVersionIfNeeded(opts.InstanceDir, gameDir, m, db, mode, effectiveConfigVersion, opts, result)
 	if err := persistUpdatedState(ctx, state, changes, m, mode, opts, db, extraDownloads, latestDownloads, rollback, effectiveConfigVersion, result); err != nil {
 		return nil, err
 	}

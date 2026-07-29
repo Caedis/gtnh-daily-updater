@@ -11,12 +11,13 @@ import (
 )
 
 var (
-	dryRunAll      bool
-	forceAll       bool
-	latestAll      bool
-	concurrencyAll int
-	cacheDirAll    string
-	noCacheAll     bool
+	dryRunAll         bool
+	forceAll          bool
+	latestAll         bool
+	concurrencyAll    int
+	cacheDirAll       string
+	noCacheAll        bool
+	noVersionStampAll bool
 )
 
 var updateAllCmdName = "update-all"
@@ -106,6 +107,11 @@ var updateAllCmd = &cobra.Command{
 			} else if p.NoCache != nil {
 				opts.NoCache = *p.NoCache
 			}
+			if cmd.Flags().Changed("no-version-stamp") {
+				opts.NoVersionStamp = noVersionStampAll
+			} else if p.NoVersionStamp != nil {
+				opts.NoVersionStamp = *p.NoVersionStamp
+			}
 
 			// Per-profile verbose setting; CLI wins.
 			profileVerbose := verbose
@@ -136,6 +142,9 @@ var updateAllCmd = &cobra.Command{
 			if res.ConfigUpdated {
 				logging.Infoln("  Pack configs: updated to new version")
 			}
+			if len(res.StampedFiles) > 0 {
+				logging.Infof("  Version stamped into %d file(s)\n", len(res.StampedFiles))
+			}
 			if len(res.Skipped) > 0 {
 				logging.Infof("  Skipped: %s\n", joinSkipped(res.Skipped))
 			}
@@ -164,5 +173,6 @@ func init() {
 	updateAllCmd.Flags().IntVar(&concurrencyAll, "concurrency", 6, "Number of concurrent downloads")
 	updateAllCmd.Flags().StringVar(&cacheDirAll, "cache-dir", "", "Directory for caching downloaded mods (default: OS user cache dir + /gtnh-daily-updater/mods/)")
 	updateAllCmd.Flags().BoolVar(&noCacheAll, "no-cache", false, "Disable download caching")
+	updateAllCmd.Flags().BoolVar(&noVersionStampAll, "no-version-stamp", false, "Do not write the pack version into config files, server.properties or instance.cfg")
 	rootCmd.AddCommand(updateAllCmd)
 }

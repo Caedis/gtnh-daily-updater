@@ -19,6 +19,7 @@ Always make a full instance backup before first using this program
 - Supports excluded mods and user-defined extra mods
 - Supports named profiles and multi-profile batch updates (`update-all`)
 - Download caching and configurable concurrency
+- Stamps the installed pack version into config files, server MOTD, and Prism instance name after each update
 - Optional startup self-update check with SHA256-verified `self-update` command
 
 ## Requirements
@@ -248,6 +249,37 @@ gtnh-daily-updater update-all main-client alt-server
 - `config diff` shows your changes relative to the pack version (`git diff <configVersion>..local`)
 - `config diff "GregTech/Pollution.cfg"` shows diff for a specific file (also accepts `config/GregTech/Pollution.cfg`)
 - Config tracking requires git; config updates are skipped gracefully if git is unavailable or the repo hasn't been initialized yet
+
+## Version Stamping
+
+After each update the installed pack version is written into the same files
+DreamAssemblerXXL stamps when it builds a release, so the main menu, the
+dreamcraft and DreamCoreMod configs, the server MOTD and the Prism instance
+name all match what you have installed:
+
+- `config/txloader/load/mainmenu/version.txt`
+- `config/GTNewHorizons/dreamcraft.cfg` (`S:ModPackVersion`)
+- `config/DreamCoreMod.properties` (`displayedModpackVersion`)
+- `server.properties` (`motd`) — only when the MOTD still starts with `GT:New Horizons`
+- `instance.cfg` (`name`) — only when the name still starts with `GTNH`
+
+The stamped string matches DreamAssemblerXXL's, e.g. `2.9.x (Daily 648) - 2026-07-28`.
+Under `--latest` the mods are newer than the counted build, so the count is marked:
+`2.9.x (Daily 648+) - 2026-07-28`.
+
+Missing files are skipped and never created, and a customized MOTD or instance
+name is left alone. `config/DreamCoreMod.properties` is the one file where a
+missing key is added rather than skipped. Pass `--no-version-stamp` (or set
+`no-version-stamp = true` in a profile) to turn it off.
+
+Because stamping runs after the git-backed config snapshot, the stamped lines
+show up as local modifications in `config diff` on the following run.
+
+Stamping is skipped when a config update itself was skipped — that is, when the
+pack version moved forward but the instance has no config tracking repo yet. Run
+`init` (see above) so the instance stops displaying a version it is not on. Note
+that without git installed, configs are not updated but the version is still
+stamped, so the displayed version can run ahead of the configs on disk.
 
 ## Caching and Performance
 

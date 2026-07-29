@@ -20,6 +20,7 @@ import (
 	"github.com/caedis/gtnh-daily-updater/internal/lwjgl3ify"
 	"github.com/caedis/gtnh-daily-updater/internal/manifest"
 	"github.com/caedis/gtnh-daily-updater/internal/paths"
+	"github.com/caedis/gtnh-daily-updater/internal/versionstamp"
 )
 
 func normalizeRunOptions(opts Options) Options {
@@ -460,4 +461,34 @@ func persistUpdatedState(ctx context.Context, state *config.LocalState, changes 
 	logging.Debugf("Verbose: saved state with mode=%s manifest-date=%s config=%s\n", state.Mode, state.ManifestDate, state.ConfigVersion)
 
 	return nil
+}
+
+// stampVersionIfNeeded writes the installed pack version into the files DAXXL
+// stamps at assembly time. Purely cosmetic, so failures only warn.
+func stampVersionIfNeeded(instanceDir, gameDir string, m *manifest.DailyManifest, db *assets.AssetsDB, mode, configVersion string, opts Options, result *UpdateResult) {
+	if opts.DryRun || opts.NoVersionStamp {
+		return
+	}
+	// ConfigSkipped means snapshotAndUpdateConfigsIfNeeded left state.ConfigVersion
+	// at its old value (the .gtnh-configs repo is missing), so the instance never
+	// actually moved to configVersion — do not stamp a version it is not on.
+	if result.ConfigSkipped {
+		return
+	}
+
+	count := db.LatestDaily
+	if mode == manifest.ModeExperimental {
+		count = db.LatestExperimental
+	}
+
+	// --latest picks mods past the counted build, marked with a "+" on the count.
+	v := versionstamp.Build(configVersion, mode, count, m.LastUpdated, opts.Latest)
+	stamped, err := versionstamp.Apply(instanceDir, gameDir, v)
+	if err != nil {
+		logging.Infof("  Warning: version stamping failed: %v\n", err)
+	}
+	if len(stamped) > 0 {
+		logging.Debugf("Verbose: version stamped %v as %q\n", stamped, v.Long)
+	}
+	result.StampedFiles = stamped
 }

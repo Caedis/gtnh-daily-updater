@@ -1,6 +1,7 @@
 package assets
 
 import (
+	"encoding/json"
 	"testing"
 
 	"github.com/caedis/gtnh-daily-updater/internal/fileutil"
@@ -73,5 +74,25 @@ func TestBuildFilenameIndexCleanNameNoDuplicate(t *testing.T) {
 	}
 	if idx[clean][0].RawFilename != clean {
 		t.Errorf("RawFilename=%q, want %q", idx[clean][0].RawFilename, clean)
+	}
+}
+
+func TestAssetsDBParsesDevCounters(t *testing.T) {
+	raw := `{
+		"latest_experimental": 141,
+		"latest_daily": 648,
+		"config": {"name": "GT-New-Horizons-Modpack", "latest_version": "2.9.0-nightly-2026-07-28", "versions": []},
+		"mods": []
+	}`
+
+	var db AssetsDB
+	if err := json.Unmarshal([]byte(raw), &db); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if db.LatestDaily != 648 {
+		t.Errorf("LatestDaily = %d, want 648", db.LatestDaily)
+	}
+	if db.LatestExperimental != 141 {
+		t.Errorf("LatestExperimental = %d, want 141", db.LatestExperimental)
 	}
 }

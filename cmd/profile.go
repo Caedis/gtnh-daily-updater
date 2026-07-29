@@ -16,14 +16,15 @@ var profileCmd = &cobra.Command{
 
 // Flags for profile create
 var (
-	profInstanceDir *string
-	profSide        *string
-	profMode        *string
-	profConcurrency *int
-	profLatest      *bool
-	profCacheDir    *string
-	profNoCache     *bool
-	profVerbose     *bool
+	profInstanceDir    *string
+	profSide           *string
+	profMode           *string
+	profConcurrency    *int
+	profLatest         *bool
+	profCacheDir       *string
+	profNoCache        *bool
+	profNoVersionStamp *bool
+	profVerbose        *bool
 )
 
 var profileCreateCmd = &cobra.Command{
@@ -53,6 +54,9 @@ var profileCreateCmd = &cobra.Command{
 		}
 		if cmd.Flags().Changed("no-cache") {
 			p.NoCache = profNoCache
+		}
+		if cmd.Flags().Changed("no-version-stamp") {
+			p.NoVersionStamp = profNoVersionStamp
 		}
 		if cmd.Flags().Changed("verbose") {
 			p.Verbose = profVerbose
@@ -130,6 +134,7 @@ func init() {
 	profLatest = profileCreateCmd.Flags().Bool("latest", false, "Use latest non-pre versions")
 	profCacheDir = profileCreateCmd.Flags().String("cache-dir", "", "Cache directory for downloaded mods")
 	profNoCache = profileCreateCmd.Flags().Bool("no-cache", false, "Disable download caching")
+	profNoVersionStamp = profileCreateCmd.Flags().Bool("no-version-stamp", false, "Do not write the pack version into config files, server.properties or instance.cfg")
 	profVerbose = profileCreateCmd.Flags().Bool("verbose", false, "Enable verbose logging")
 
 	profileCmd.AddCommand(profileCreateCmd, profileListCmd, profileShowCmd, profileDeleteCmd)

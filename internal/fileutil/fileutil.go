@@ -86,3 +86,26 @@ func CopyDirExcluding(src, dst string, excludeTopLevel ...string) error {
 		return CopyFile(path, target)
 	})
 }
+
+// WriteFileAtomic writes data through a temp file in the same directory, so an
+// interrupted write cannot leave a truncated config behind.
+func WriteFileAtomic(path string, data []byte, perm os.FileMode) error {
+	tmp, err := os.CreateTemp(filepath.Dir(path), ".gtnh-tmp-*")
+	if err != nil {
+		return err
+	}
+	tmpName := tmp.Name()
+	defer os.Remove(tmpName)
+
+	if _, err := tmp.Write(data); err != nil {
+		tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	if err := os.Chmod(tmpName, perm); err != nil {
+		return err
+	}
+	return os.Rename(tmpName, path)
+}

@@ -15,15 +15,16 @@ import (
 // Profile holds saveable CLI options. All fields are pointers so we can
 // distinguish "not set" from zero values.
 type Profile struct {
-	InstanceDir *string `toml:"instance-dir,omitempty"`
-	Side        *string `toml:"side,omitempty"`
-	Mode        *string `toml:"mode,omitempty"`
-	Concurrency *int    `toml:"concurrency,omitempty"`
-	Latest      *bool   `toml:"latest,omitempty"`
-	CacheDir    *string `toml:"cache-dir,omitempty"`
-	NoCache     *bool   `toml:"no-cache,omitempty"`
-	Verbose     *bool   `toml:"verbose,omitempty"`
-	LogFile     *string `toml:"log-file,omitempty"`
+	InstanceDir    *string `toml:"instance-dir,omitempty"`
+	Side           *string `toml:"side,omitempty"`
+	Mode           *string `toml:"mode,omitempty"`
+	Concurrency    *int    `toml:"concurrency,omitempty"`
+	Latest         *bool   `toml:"latest,omitempty"`
+	CacheDir       *string `toml:"cache-dir,omitempty"`
+	NoCache        *bool   `toml:"no-cache,omitempty"`
+	NoVersionStamp *bool   `toml:"no-version-stamp,omitempty"`
+	Verbose        *bool   `toml:"verbose,omitempty"`
+	LogFile        *string `toml:"log-file,omitempty"`
 }
 
 // Dir returns the profiles directory under the OS-native user config dir.
