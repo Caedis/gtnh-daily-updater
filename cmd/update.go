@@ -9,12 +9,13 @@ import (
 )
 
 var (
-	dryRun      bool
-	force       bool
-	latest      bool
-	concurrency int
-	cacheDir    string
-	noCache     bool
+	dryRun         bool
+	force          bool
+	latest         bool
+	concurrency    int
+	cacheDir       string
+	noCache        bool
+	noVersionStamp bool
 )
 
 var updateCmdName = "update"
@@ -24,15 +25,16 @@ var updateCmd = &cobra.Command{
 	Short: "Update mods and tracked pack files to the latest manifest build",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		opts := updater.Options{
-			InstanceDir:   instanceDir,
-			DryRun:        dryRun,
-			Force:         force,
-			Latest:        latest,
-			Concurrency:   concurrency,
-			GithubToken:   getGithubToken(),
-			CurseForgeKey: getCurseForgeKey(),
-			CacheDir:      cacheDir,
-			NoCache:       noCache,
+			InstanceDir:    instanceDir,
+			DryRun:         dryRun,
+			Force:          force,
+			Latest:         latest,
+			Concurrency:    concurrency,
+			GithubToken:    getGithubToken(),
+			CurseForgeKey:  getCurseForgeKey(),
+			CacheDir:       cacheDir,
+			NoCache:        noCache,
+			NoVersionStamp: noVersionStamp,
 		}
 
 		result, err := updater.Run(context.Background(), opts)
@@ -41,6 +43,10 @@ var updateCmd = &cobra.Command{
 		}
 
 		if result.UpToDate || dryRun {
+			// The up-to-date path still repairs a stale version stamp.
+			if len(result.StampedFiles) > 0 {
+				logging.Infof("  Version stamped into %d file(s)\n", len(result.StampedFiles))
+			}
 			return nil
 		}
 
@@ -50,6 +56,10 @@ var updateCmd = &cobra.Command{
 
 		if result.ConfigUpdated {
 			logging.Infoln("  Pack configs: updated to new version")
+		}
+
+		if len(result.StampedFiles) > 0 {
+			logging.Infof("  Version stamped into %d file(s)\n", len(result.StampedFiles))
 		}
 
 		if len(result.Skipped) > 0 {
@@ -67,6 +77,7 @@ func init() {
 	updateCmd.Flags().IntVar(&concurrency, "concurrency", 6, "Number of concurrent downloads")
 	updateCmd.Flags().StringVar(&cacheDir, "cache-dir", "", "Directory for caching downloaded mods (default: OS user cache dir + /gtnh-daily-updater/mods/)")
 	updateCmd.Flags().BoolVar(&noCache, "no-cache", false, "Disable download caching")
+	updateCmd.Flags().BoolVar(&noVersionStamp, "no-version-stamp", false, "Do not write the pack version into config files, server.properties or instance.cfg")
 	rootCmd.AddCommand(updateCmd)
 }
 

@@ -67,6 +67,9 @@ var rootCmd = &cobra.Command{
 			if p.NoCache != nil && !cmd.Flags().Changed("no-cache") {
 				noCache = *p.NoCache
 			}
+			if p.NoVersionStamp != nil && !cmd.Flags().Changed("no-version-stamp") {
+				noVersionStamp = *p.NoVersionStamp
+			}
 			if p.Verbose != nil && !cmd.Flags().Changed("verbose") {
 				verbose = *p.Verbose
 			}

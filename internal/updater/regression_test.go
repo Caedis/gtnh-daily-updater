@@ -7,14 +7,18 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/caedis/gtnh-daily-updater/internal/assets"
 	"github.com/caedis/gtnh-daily-updater/internal/config"
 	"github.com/caedis/gtnh-daily-updater/internal/fileutil"
 	"github.com/caedis/gtnh-daily-updater/internal/github"
+	"github.com/caedis/gtnh-daily-updater/internal/gitconfigs"
 	"github.com/caedis/gtnh-daily-updater/internal/logging"
+	"github.com/caedis/gtnh-daily-updater/internal/manifest"
 	"github.com/caedis/gtnh-daily-updater/internal/maven"
 )
 
@@ -1558,5 +1562,122 @@ func TestResolveLatest_GitHubOlderDoesNotConsultMaven(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(instanceDir, "mods", "TestMod-1.0.0.jar")); err != nil {
 		t.Fatalf("expected 1.0.0 jar (added at manifest version): %v", err)
+	}
+}
+
+func gitCmd(t *testing.T, dir string, args ...string) {
+	t.Helper()
+	cmd := exec.Command("git", args...)
+	cmd.Dir = dir
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git %v: %v\n%s", args, err, out)
+	}
+}
+
+func gitOutput(t *testing.T, dir string, args ...string) string {
+	t.Helper()
+	cmd := exec.Command("git", args...)
+	cmd.Dir = dir
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("git %v: %v\n%s", args, err, out)
+	}
+	return string(out)
+}
+
+// TestRun_StampsVersionAfterConfigSnapshot pins the ordering invariant: version
+// stamping must run after snapshotAndUpdateConfigsIfNeeded's Snapshot step,
+// because a git merge there would otherwise restore the pack's un-stamped
+// default and wipe an earlier stamp. The config version is left UNCHANGED
+// versus the manifest so only Snapshot runs (no ApplyUpdate, no network),
+// keeping the whole run offline.
+func TestRun_StampsVersionAfterConfigSnapshot(t *testing.T) {
+	if !gitconfigs.IsGitAvailable() {
+		t.Skip("git not available")
+	}
+	instanceDir := t.TempDir()
+	gameDir := instanceDir // direct/server layout
+	if err := os.MkdirAll(filepath.Join(gameDir, "mods"), 0o755); err != nil {
+		t.Fatalf("MkdirAll failed: %v", err)
+	}
+
+	const defaultLine = "displayedModpackVersion=2.9.0\n"
+	cfgPath := filepath.Join(gameDir, "config", "DreamCoreMod.properties")
+	if err := os.MkdirAll(filepath.Dir(cfgPath), 0o755); err != nil {
+		t.Fatalf("MkdirAll failed: %v", err)
+	}
+	if err := os.WriteFile(cfgPath, []byte(defaultLine), 0o644); err != nil {
+		t.Fatalf("WriteFile failed: %v", err)
+	}
+
+	// .gtnh-configs repo on `local`, seeded with the same (unstamped) config the
+	// instance carries, as it would be after Init.
+	repoDir := gitconfigs.ConfigRepoDir(gameDir)
+	if err := os.MkdirAll(repoDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll failed: %v", err)
+	}
+	gitCmd(t, repoDir, "init", "-b", "main")
+	gitCmd(t, repoDir, "config", "user.name", "test")
+	gitCmd(t, repoDir, "config", "user.email", "test@example.com")
+	gitCmd(t, repoDir, "config", "commit.gpgsign", "false")
+	repoCfg := filepath.Join(repoDir, "config", "DreamCoreMod.properties")
+	if err := os.MkdirAll(filepath.Dir(repoCfg), 0o755); err != nil {
+		t.Fatalf("MkdirAll failed: %v", err)
+	}
+	if err := os.WriteFile(repoCfg, []byte(defaultLine), 0o644); err != nil {
+		t.Fatalf("WriteFile failed: %v", err)
+	}
+	gitCmd(t, repoDir, "add", "-A")
+	gitCmd(t, repoDir, "commit", "-m", "pack v1")
+	gitCmd(t, repoDir, "checkout", "-b", "local")
+
+	state := &config.LocalState{
+		Side:          "server",
+		ManifestDate:  "2026-07-27",
+		ConfigVersion: "cfg-1",
+		Mods:          map[string]config.InstalledMod{},
+	}
+	if err := state.Save(instanceDir); err != nil {
+		t.Fatalf("Save failed: %v", err)
+	}
+
+	m := &manifest.DailyManifest{
+		Version:      "daily",
+		LastUpdated:  "2026-07-28T00:00:00+00:00",
+		Config:       "cfg-1", // unchanged vs state: ApplyUpdate is never invoked
+		GithubMods:   map[string]manifest.ModInfo{},
+		ExternalMods: map[string]manifest.ModInfo{},
+	}
+	db := &assets.AssetsDB{LatestDaily: 648}
+
+	result, err := Run(context.Background(), Options{
+		InstanceDir: instanceDir,
+		Force:       true,
+		Shared:      &SharedData{Manifest: m, AssetsDB: db, Mode: "daily"},
+	})
+	if err != nil {
+		t.Fatalf("Run failed: %v", err)
+	}
+	if result.ConfigSkipped {
+		t.Fatalf("expected config not skipped, got ConfigSkipped=true")
+	}
+
+	// The instance's own file must carry the stamp.
+	got, err := os.ReadFile(cfgPath)
+	if err != nil {
+		t.Fatalf("ReadFile failed: %v", err)
+	}
+	if !strings.Contains(string(got), "Daily 648") {
+		t.Fatalf("instance config not stamped: %q", got)
+	}
+
+	// The snapshot commit (made before stamping in Run's call order) must NOT
+	// contain the stamp — proving the stamp landed after the snapshot.
+	repoContent := gitOutput(t, repoDir, "show", "HEAD:config/DreamCoreMod.properties")
+	if strings.Contains(repoContent, "Daily 648") {
+		t.Fatalf("snapshot commit already contains the stamp: stamping ran before the snapshot: %q", repoContent)
+	}
+	if strings.TrimSpace(repoContent) != strings.TrimSpace(defaultLine) {
+		t.Fatalf("snapshot commit content = %q, want unstamped default %q", repoContent, defaultLine)
 	}
 }

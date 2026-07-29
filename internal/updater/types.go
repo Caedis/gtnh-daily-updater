@@ -24,6 +24,9 @@ type Options struct {
 	CurseForgeKey   string
 	CacheDir        string
 	NoCache         bool
+	// NoVersionStamp disables writing the pack version into config files,
+	// server.properties and instance.cfg.
+	NoVersionStamp bool
 	// Shared optionally supplies pre-fetched manifest and assets DB.
 	// When non-nil, Run skips those network fetches.
 	Shared *SharedData
@@ -38,7 +41,9 @@ type UpdateResult struct {
 	Unchanged     int
 	ConfigUpdated bool
 	ConfigSkipped bool
-	Skipped       []string
+	// StampedFiles lists pack files whose version stamp was rewritten.
+	StampedFiles []string
+	Skipped      []string
 	// UpToDate is set when Run exited early because nothing needed doing.
 	// Callers use it to decide whether to print a summary, instead of
 	// re-deriving the condition from the version fields.

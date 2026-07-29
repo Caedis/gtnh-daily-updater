@@ -20,6 +20,10 @@ type AssetsDB struct {
 	Config AssetEntry   `json:"config"`
 	Mods   []AssetEntry `json:"mods"`
 
+	// Dev build counters, used for the displayed pack version.
+	LatestDaily        int `json:"latest_daily"`
+	LatestExperimental int `json:"latest_experimental"`
+
 	// Index built after parsing
 	modIndex           map[string]*AssetEntry
 	versionFilenameIdx map[string]string // "ModName/version" → filename

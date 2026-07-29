@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/caedis/gtnh-daily-updater/internal/versionstamp"
 )
 
 func gitInit(t *testing.T, dir string) {
@@ -691,5 +693,139 @@ func TestFetchForceUpdatesMovedUpstreamTag(t *testing.T) {
 	}
 	if strings.TrimSpace(got) != strings.TrimSpace(commitB) {
 		t.Fatalf("after force-fetch: local T = %s, want B %s (stale tag, real pack changes would be skipped)", strings.TrimSpace(got), strings.TrimSpace(commitB))
+	}
+}
+
+// stampedLine is what versionstamp writes into DreamCoreMod.properties for the
+// version used below. Used by the merge test, which needs the line pre-placed
+// rather than produced by a real Apply call.
+const stampedLine = "displayedModpackVersion=2.9.x (Daily 648) - 2026-07-28\n"
+
+// setupStampRepo builds a gameDir whose .gtnh-configs repo is on a `local`
+// branch holding the pack's default DreamCoreMod.properties.
+func setupStampRepo(t *testing.T) (gameDir, repoDir string) {
+	t.Helper()
+	ctx := context.Background()
+	gameDir = t.TempDir()
+	repoDir = ConfigRepoDir(gameDir)
+
+	if err := os.MkdirAll(repoDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	gitInit(t, repoDir)
+
+	writeFile(t, filepath.Join(repoDir, "config", "DreamCoreMod.properties"), "displayedModpackVersion=2.9.0\n")
+	if err := runGit(ctx, repoDir, "add", "-A"); err != nil {
+		t.Fatal(err)
+	}
+	if err := runGit(ctx, repoDir, "commit", "-m", "pack v1"); err != nil {
+		t.Fatal(err)
+	}
+	if err := runGit(ctx, repoDir, "tag", "v1"); err != nil {
+		t.Fatal(err)
+	}
+	if err := runGit(ctx, repoDir, "checkout", "-b", "local", "v1"); err != nil {
+		t.Fatal(err)
+	}
+
+	// The instance carries the same file, as it would after Init.
+	writeFile(t, filepath.Join(gameDir, "config", "DreamCoreMod.properties"), "displayedModpackVersion=2.9.0\n")
+	return gameDir, repoDir
+}
+
+// TestSnapshotOfStampedConfigDoesNotChurn proves the real stamp+snapshot round
+// trip is idempotent: stamping and snapshotting twice in a row (same version)
+// produces no tree change on the second round.
+func TestSnapshotOfStampedConfigDoesNotChurn(t *testing.T) {
+	if !IsGitAvailable() {
+		t.Skip("git not available")
+	}
+	ctx := context.Background()
+	gameDir, repoDir := setupStampRepo(t)
+	v := versionstamp.DisplayVersion{Short: "2.9.x (Daily 648)", Long: "2.9.x (Daily 648) - 2026-07-28", Date: "2026-07-28"}
+
+	// Round 1: stamp the instance for real, then snapshot.
+	stamped, err := versionstamp.Apply(gameDir, gameDir, v)
+	if err != nil {
+		t.Fatalf("first Apply: %v", err)
+	}
+	found := false
+	for _, f := range stamped {
+		if f == "config/DreamCoreMod.properties" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("first Apply did not stamp config/DreamCoreMod.properties, stamped = %v", stamped)
+	}
+	if err := Snapshot(ctx, gameDir, "server"); err != nil {
+		t.Fatalf("first snapshot: %v", err)
+	}
+
+	// Round 2: same version. Apply is idempotent, so nothing changes on disk.
+	if _, err := versionstamp.Apply(gameDir, gameDir, v); err != nil {
+		t.Fatalf("second Apply: %v", err)
+	}
+	if err := Snapshot(ctx, gameDir, "server"); err != nil {
+		t.Fatalf("second snapshot: %v", err)
+	}
+
+	out, err := runGitOutput(ctx, repoDir, "diff", "HEAD~1", "HEAD", "--name-only")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.TrimSpace(out) != "" {
+		t.Fatalf("second snapshot changed files: %q", strings.TrimSpace(out))
+	}
+}
+
+// TestStampedConfigMergesCleanlyAcrossPackUpdate checks that a stamped line does
+// not conflict when the pack ships a new version of the same file, and that the
+// pack's value wins (leaving the file ready to be restamped).
+func TestStampedConfigMergesCleanlyAcrossPackUpdate(t *testing.T) {
+	if !IsGitAvailable() {
+		t.Skip("git not available")
+	}
+	ctx := context.Background()
+	gameDir, repoDir := setupStampRepo(t)
+	cfg := filepath.Join(repoDir, "config", "DreamCoreMod.properties")
+
+	// Pack v2 ships its own default for the same key.
+	if err := runGit(ctx, repoDir, "checkout", "main"); err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, cfg, "displayedModpackVersion=2.9.1\n")
+	if err := runGit(ctx, repoDir, "add", "-A"); err != nil {
+		t.Fatal(err)
+	}
+	if err := runGit(ctx, repoDir, "commit", "-m", "pack v2"); err != nil {
+		t.Fatal(err)
+	}
+	if err := runGit(ctx, repoDir, "tag", "v2"); err != nil {
+		t.Fatal(err)
+	}
+	if err := runGit(ctx, repoDir, "checkout", "local"); err != nil {
+		t.Fatal(err)
+	}
+
+	// The instance's stamp is snapshotted onto `local`.
+	writeFile(t, filepath.Join(gameDir, "config", "DreamCoreMod.properties"), stampedLine)
+	if err := Snapshot(ctx, gameDir, "server"); err != nil {
+		t.Fatalf("snapshot: %v", err)
+	}
+
+	if err := mergePackVersion(ctx, repoDir, "v2", "Update configs to v2"); err != nil {
+		t.Fatalf("merge v2: %v", err)
+	}
+
+	got, err := os.ReadFile(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(got), "<<<<<<<") {
+		t.Fatalf("merge left conflict markers: %q", got)
+	}
+	if strings.TrimSpace(string(got)) != "displayedModpackVersion=2.9.1" {
+		t.Fatalf("after merge = %q, want the pack default 2.9.1", strings.TrimSpace(string(got)))
 	}
 }
