@@ -242,6 +242,7 @@ gtnh-daily-updater update-all main-client alt-server
 ## State, Paths, and Merge Behavior
 
 - Local state is stored at `<instance-dir>/.gtnh-daily-updater.json`
+- That state records `display_version`, the pack version as shown in game, so the next run can report what you upgraded from; instances updated before it existed fall back to the config version once
 - On Prism/MultiMC layouts, game files are resolved under `<instance-dir>/.minecraft/`
 - On server/other layouts, game files are resolved directly under `<instance-dir>/`
 - Config files are tracked in a git repo at `<game-dir>/.gtnh-configs/` on a `local` branch; pack updates are applied via `git merge -X theirs` (pack wins on conflicts)

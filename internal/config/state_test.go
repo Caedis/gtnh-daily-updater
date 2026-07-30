@@ -98,3 +98,49 @@ func TestGameDir(t *testing.T) {
 		}
 	})
 }
+
+func TestSaveAndLoadDisplayVersion(t *testing.T) {
+	t.Parallel()
+
+	tmp := t.TempDir()
+	s := &LocalState{
+		Side:           "client",
+		ManifestDate:   "2026-07-28",
+		ConfigVersion:  "2.9.0-nightly-2026-07-28",
+		DisplayVersion: "2.9.x (Daily 648) - 2026-07-28",
+	}
+	if err := s.Save(tmp); err != nil {
+		t.Fatalf("Save failed: %v", err)
+	}
+
+	loaded, err := Load(tmp)
+	if err != nil {
+		t.Fatalf("Load failed: %v", err)
+	}
+	if loaded.DisplayVersion != "2.9.x (Daily 648) - 2026-07-28" {
+		t.Errorf("DisplayVersion = %q, want %q", loaded.DisplayVersion, "2.9.x (Daily 648) - 2026-07-28")
+	}
+}
+
+func TestLoadStateWithoutDisplayVersion(t *testing.T) {
+	t.Parallel()
+
+	tmp := t.TempDir()
+	older := `{
+  "side": "client",
+  "manifest_date": "2026-07-27",
+  "config_version": "2.9.0-nightly-2026-07-27",
+  "mods": {}
+}`
+	if err := os.WriteFile(filepath.Join(tmp, StateFile), []byte(older), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	loaded, err := Load(tmp)
+	if err != nil {
+		t.Fatalf("Load failed: %v", err)
+	}
+	if loaded.DisplayVersion != "" {
+		t.Errorf("DisplayVersion = %q, want empty for a pre-feature state file", loaded.DisplayVersion)
+	}
+}

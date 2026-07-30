@@ -73,18 +73,33 @@ func Run(ctx context.Context, opts Options) (*UpdateResult, error) {
 
 	added, removed, updated, unchanged := diff.Summary(changes)
 	logging.Debugf("Verbose: diff summary added=%d removed=%d updated=%d unchanged=%d\n", added, removed, updated, unchanged)
+
+	displayVersion := buildDisplayVersion(m, db, mode, effectiveConfigVersion, opts)
+	// Instances updated before display versions were tracked have none stored;
+	// show the config tag they do have.
+	oldDisplay := state.DisplayVersion
+	if oldDisplay == "" {
+		oldDisplay = state.ConfigVersion
+	}
+
 	result := &UpdateResult{
-		OldVersion: state.ConfigVersion,
-		NewVersion: effectiveConfigVersion,
-		Added:      added,
-		Removed:    removed,
-		Updated:    updated,
-		Unchanged:  unchanged,
+		OldVersion:       oldDisplay,
+		NewVersion:       displayVersion.Long,
+		OldConfigVersion: state.ConfigVersion,
+		NewConfigVersion: effectiveConfigVersion,
+		Added:            added,
+		Removed:          removed,
+		Updated:          updated,
+		Unchanged:        unchanged,
 	}
 
 	if !opts.Force && !opts.DryRun && result.Added == 0 && result.Removed == 0 && result.Updated == 0 && state.ConfigVersion == effectiveConfigVersion {
 		result.UpToDate = true
-		stampVersionIfNeeded(opts.InstanceDir, gameDir, m, db, mode, effectiveConfigVersion, opts, result)
+		stampVersionIfNeeded(opts.InstanceDir, gameDir, displayVersion, opts, result)
+		// Record the display version here too: this path never reaches
+		// persistUpdatedState, so a pre-feature instance would otherwise stay on
+		// the empty fallback forever despite having its configs re-stamped.
+		recordDisplayVersionIfChanged(opts.InstanceDir, state, displayVersion.Long)
 		logging.Infoln("Already up to date.")
 		return result, nil
 	}
@@ -123,8 +138,8 @@ func Run(ctx context.Context, opts Options) (*UpdateResult, error) {
 		return nil, err
 	}
 	// After the config merge, which restores the pack's default version lines.
-	stampVersionIfNeeded(opts.InstanceDir, gameDir, m, db, mode, effectiveConfigVersion, opts, result)
-	if err := persistUpdatedState(ctx, state, changes, m, mode, opts, db, extraDownloads, latestDownloads, rollback, effectiveConfigVersion, result); err != nil {
+	stampVersionIfNeeded(opts.InstanceDir, gameDir, displayVersion, opts, result)
+	if err := persistUpdatedState(ctx, state, changes, m, mode, opts, db, extraDownloads, latestDownloads, rollback, effectiveConfigVersion, displayVersion.Long, result); err != nil {
 		return nil, err
 	}
 

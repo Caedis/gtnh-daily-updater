@@ -50,12 +50,12 @@ var updateCmd = &cobra.Command{
 			return nil
 		}
 
-		logging.Infof("\nUpdate complete: %s → %s\n", result.OldVersion, result.NewVersion)
+		logging.Infof("\nUpdate complete: %s\n", versionTransition(result.OldVersion, result.NewVersion))
 		logging.Infof("  Mods: %d added, %d removed, %d updated, %d unchanged\n",
 			result.Added, result.Removed, result.Updated, result.Unchanged)
 
 		if result.ConfigUpdated {
-			logging.Infoln("  Pack configs: updated to new version")
+			logging.Infof("  Pack configs: %s → %s\n", result.OldConfigVersion, result.NewConfigVersion)
 		}
 
 		if len(result.StampedFiles) > 0 {
@@ -79,6 +79,24 @@ func init() {
 	updateCmd.Flags().BoolVar(&noCache, "no-cache", false, "Disable download caching")
 	updateCmd.Flags().BoolVar(&noVersionStamp, "no-version-stamp", false, "Do not write the pack version into config files, server.properties or instance.cfg")
 	rootCmd.AddCommand(updateCmd)
+}
+
+// versionTransition renders the headline form: an arrow when the pack version
+// moved, otherwise the current version with a note.
+func versionTransition(old, new string) string {
+	if old == new {
+		return new + " (pack version unchanged)"
+	}
+	return old + " → " + new
+}
+
+// versionCell renders the table form: an arrow when the pack version moved,
+// otherwise just the version. No prose — it sits in a column.
+func versionCell(old, new string) string {
+	if old == new {
+		return new
+	}
+	return old + " → " + new
 }
 
 func joinSkipped(s []string) string {

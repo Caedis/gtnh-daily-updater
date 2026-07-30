@@ -11,13 +11,17 @@ import (
 const StateFile = ".gtnh-daily-updater.json"
 
 type LocalState struct {
-	Side          string                  `json:"side"`
-	Mode          string                  `json:"mode,omitempty"`
-	ManifestDate  string                  `json:"manifest_date"`
-	ConfigVersion string                  `json:"config_version"`
-	Mods          map[string]InstalledMod `json:"mods"`
-	ExcludeMods   []string                `json:"exclude_mods,omitempty"`
-	ExtraMods     map[string]ExtraModSpec `json:"extra_mods,omitempty"`
+	Side          string `json:"side"`
+	Mode          string `json:"mode,omitempty"`
+	ManifestDate  string `json:"manifest_date"`
+	ConfigVersion string `json:"config_version"`
+	// DisplayVersion is the pack version as shown in game, e.g.
+	// "2.9.x (Daily 648) - 2026-07-28". Empty on state files written before
+	// this was tracked.
+	DisplayVersion string                  `json:"display_version,omitempty"`
+	Mods           map[string]InstalledMod `json:"mods"`
+	ExcludeMods    []string                `json:"exclude_mods,omitempty"`
+	ExtraMods      map[string]ExtraModSpec `json:"extra_mods,omitempty"`
 }
 
 type ExtraModSpec struct {
