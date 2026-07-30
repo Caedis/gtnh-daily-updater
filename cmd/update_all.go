@@ -136,11 +136,11 @@ var updateAllCmd = &cobra.Command{
 				continue
 			}
 
-			logging.Infof("\nUpdate complete: %s → %s\n", res.OldVersion, res.NewVersion)
+			logging.Infof("\nUpdate complete: %s\n", versionTransition(res.OldVersion, res.NewVersion))
 			logging.Infof("  Mods: %d added, %d removed, %d updated, %d unchanged\n",
 				res.Added, res.Removed, res.Updated, res.Unchanged)
 			if res.ConfigUpdated {
-				logging.Infoln("  Pack configs: updated to new version")
+				logging.Infof("  Pack configs: %s → %s\n", res.OldConfigVersion, res.NewConfigVersion)
 			}
 			if len(res.StampedFiles) > 0 {
 				logging.Infof("  Version stamped into %d file(s)\n", len(res.StampedFiles))
@@ -158,8 +158,8 @@ var updateAllCmd = &cobra.Command{
 				continue
 			}
 			modsChanged := r.result.Added + r.result.Removed + r.result.Updated
-			logging.Infof("  %-20s  OK     %s → %s   %d updated\n",
-				r.name, r.result.OldVersion, r.result.NewVersion, modsChanged)
+			logging.Infof("  %-20s  OK     %s   %d updated\n",
+				r.name, versionCell(r.result.OldVersion, r.result.NewVersion), modsChanged)
 		}
 
 		return firstErr

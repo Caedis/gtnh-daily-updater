@@ -22,7 +22,7 @@ var statusCmd = &cobra.Command{
 				instanceDir = *p.InstanceDir
 			}
 		}
-		return updater.Status(context.Background(), instanceDir, getGithubToken())
+		return updater.Status(context.Background(), instanceDir, getGithubToken(), getCurseForgeKey())
 	},
 }
 

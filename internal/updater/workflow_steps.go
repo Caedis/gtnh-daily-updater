@@ -51,11 +51,12 @@ func loadAndLogState(instanceDir string) (*config.LocalState, error) {
 		return nil, err
 	}
 	logging.Debugf(
-		"Verbose: loaded state side=%s mode=%s manifest-date=%q config=%s mods=%d excluded=%d extras=%d\n",
+		"Verbose: loaded state side=%s mode=%s manifest-date=%q config=%s display=%q mods=%d excluded=%d extras=%d\n",
 		state.Side,
 		resolveMode(state),
 		state.ManifestDate,
 		state.ConfigVersion,
+		state.DisplayVersion,
 		len(state.Mods),
 		len(state.ExcludeMods),
 		len(state.ExtraMods),
@@ -419,7 +420,7 @@ func snapshotAndUpdateConfigsIfNeeded(ctx context.Context, state *config.LocalSt
 	return nil
 }
 
-func persistUpdatedState(ctx context.Context, state *config.LocalState, changes []diff.ModChange, m *manifest.DailyManifest, mode string, opts Options, db *assets.AssetsDB, extraDownloads, latestDownloads map[string]resolvedExtra, rollback func(error) error, configVersion string, result *UpdateResult) error {
+func persistUpdatedState(ctx context.Context, state *config.LocalState, changes []diff.ModChange, m *manifest.DailyManifest, mode string, opts Options, db *assets.AssetsDB, extraDownloads, latestDownloads map[string]resolvedExtra, rollback func(error) error, configVersion, displayVersion string, result *UpdateResult) error {
 	for _, c := range changes {
 		switch c.Type {
 		case diff.Added, diff.Updated:
@@ -451,6 +452,7 @@ func persistUpdatedState(ctx context.Context, state *config.LocalState, changes 
 
 	if !result.ConfigSkipped {
 		state.ConfigVersion = configVersion
+		state.DisplayVersion = displayVersion
 	}
 	state.ManifestDate = m.LastUpdated
 	state.Mode = mode
@@ -458,14 +460,40 @@ func persistUpdatedState(ctx context.Context, state *config.LocalState, changes 
 	if err := state.Save(opts.InstanceDir); err != nil {
 		return rollback(fmt.Errorf("saving state: %w", err))
 	}
-	logging.Debugf("Verbose: saved state with mode=%s manifest-date=%s config=%s\n", state.Mode, state.ManifestDate, state.ConfigVersion)
+	logging.Debugf("Verbose: saved state with mode=%s manifest-date=%s config=%s display=%s\n", state.Mode, state.ManifestDate, state.ConfigVersion, state.DisplayVersion)
 
 	return nil
 }
 
+// recordDisplayVersionIfChanged saves state.DisplayVersion when it differs
+// from displayVersion. Used on the already-up-to-date path, where configs get
+// re-stamped every run but persistUpdatedState never runs — without this an
+// instance predating this feature would stay on the empty fallback forever.
+// A save failure is cosmetic (matches stampVersionIfNeeded): warn and continue.
+func recordDisplayVersionIfChanged(instanceDir string, state *config.LocalState, displayVersion string) {
+	if state.DisplayVersion == displayVersion {
+		return
+	}
+	state.DisplayVersion = displayVersion
+	if err := state.Save(instanceDir); err != nil {
+		logging.Infof("  Warning: saving display version failed: %v\n", err)
+	}
+}
+
+// buildDisplayVersion assembles the pack version string shown in summaries and
+// stamped into configs.
+func buildDisplayVersion(m *manifest.DailyManifest, db *assets.AssetsDB, mode, configVersion string, opts Options) versionstamp.DisplayVersion {
+	count := db.LatestDaily
+	if mode == manifest.ModeExperimental {
+		count = db.LatestExperimental
+	}
+	// --latest picks mods past the counted build, marked with a "+" on the count.
+	return versionstamp.Build(configVersion, mode, count, m.LastUpdated, opts.Latest)
+}
+
 // stampVersionIfNeeded writes the installed pack version into the files DAXXL
 // stamps at assembly time. Purely cosmetic, so failures only warn.
-func stampVersionIfNeeded(instanceDir, gameDir string, m *manifest.DailyManifest, db *assets.AssetsDB, mode, configVersion string, opts Options, result *UpdateResult) {
+func stampVersionIfNeeded(instanceDir, gameDir string, v versionstamp.DisplayVersion, opts Options, result *UpdateResult) {
 	if opts.DryRun || opts.NoVersionStamp {
 		return
 	}
@@ -476,13 +504,6 @@ func stampVersionIfNeeded(instanceDir, gameDir string, m *manifest.DailyManifest
 		return
 	}
 
-	count := db.LatestDaily
-	if mode == manifest.ModeExperimental {
-		count = db.LatestExperimental
-	}
-
-	// --latest picks mods past the counted build, marked with a "+" on the count.
-	v := versionstamp.Build(configVersion, mode, count, m.LastUpdated, opts.Latest)
 	stamped, err := versionstamp.Apply(instanceDir, gameDir, v)
 	if err != nil {
 		logging.Infof("  Warning: version stamping failed: %v\n", err)

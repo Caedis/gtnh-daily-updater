@@ -15,8 +15,8 @@ import (
 	"github.com/caedis/gtnh-daily-updater/internal/assets"
 	"github.com/caedis/gtnh-daily-updater/internal/config"
 	"github.com/caedis/gtnh-daily-updater/internal/fileutil"
-	"github.com/caedis/gtnh-daily-updater/internal/github"
 	"github.com/caedis/gtnh-daily-updater/internal/gitconfigs"
+	"github.com/caedis/gtnh-daily-updater/internal/github"
 	"github.com/caedis/gtnh-daily-updater/internal/logging"
 	"github.com/caedis/gtnh-daily-updater/internal/manifest"
 	"github.com/caedis/gtnh-daily-updater/internal/maven"
@@ -1080,7 +1080,7 @@ func TestStatus_ResolvesUnpinnedExtraVersionsBeforeDiff(t *testing.T) {
 		_ = logging.SetOutputFile("")
 	}()
 
-	if err := Status(context.Background(), instanceDir, ""); err != nil {
+	if err := Status(context.Background(), instanceDir, "", ""); err != nil {
 		t.Fatalf("Status failed: %v", err)
 	}
 
@@ -1091,6 +1091,80 @@ func TestStatus_ResolvesUnpinnedExtraVersionsBeforeDiff(t *testing.T) {
 	text := string(output)
 	if !strings.Contains(text, "0 added, 0 removed, 0 updated, 1 unchanged") {
 		t.Fatalf("unexpected status summary output:\n%s", text)
+	}
+}
+
+// TestRun_AlreadyUpToDateRecordsDisplayVersion pins the only path by which an
+// instance that predates display-version tracking (empty state.DisplayVersion)
+// ever acquires one: the already-up-to-date early return in Run. Without that
+// call, such an instance would show a raw manifest timestamp in `status`
+// forever, since persistUpdatedState is never reached on this path.
+func TestRun_AlreadyUpToDateRecordsDisplayVersion(t *testing.T) {
+	instanceDir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(instanceDir, "mods"), 0o755); err != nil {
+		t.Fatalf("MkdirAll failed: %v", err)
+	}
+
+	const manifestDate = "2026-07-28T13:58:48.371055+00:00"
+	const configVersion = "2.9.0-nightly-2026-07-28"
+
+	state := &config.LocalState{
+		Side:          "client",
+		ManifestDate:  manifestDate,
+		ConfigVersion: configVersion,
+		Mods:          map[string]config.InstalledMod{},
+	}
+	if err := state.Save(instanceDir); err != nil {
+		t.Fatalf("Save failed: %v", err)
+	}
+
+	server := newUpdaterMockServer(t, mockManifestAndAssets{
+		manifest: map[string]any{
+			"version":       "daily",
+			"last_version":  "daily-previous",
+			"last_updated":  manifestDate,
+			"config":        configVersion,
+			"github_mods":   map[string]any{},
+			"external_mods": map[string]any{},
+		},
+		assets: map[string]any{
+			"config":              map[string]any{"versions": []any{}},
+			"mods":                []any{},
+			"latest_daily":        648,
+			"latest_experimental": 141,
+		},
+	})
+	restoreClient := rewriteDefaultHTTPClient(t, server)
+
+	// Pre-fetch SharedData exactly as update-all does, then take the server
+	// offline: the up-to-date path below must make no further network calls.
+	shared, err := FetchSharedData(context.Background(), "daily")
+	if err != nil {
+		t.Fatalf("FetchSharedData failed: %v", err)
+	}
+	restoreClient()
+	server.Close()
+
+	// Force is intentionally NOT set: it skips the early-return branch under
+	// test entirely (it forces a real update path instead).
+	result, err := Run(context.Background(), Options{
+		InstanceDir: instanceDir,
+		Shared:      shared,
+	})
+	if err != nil {
+		t.Fatalf("Run failed: %v", err)
+	}
+	if !result.UpToDate {
+		t.Fatalf("expected UpToDate=true, got result: %+v", result)
+	}
+
+	updatedState, err := config.Load(instanceDir)
+	if err != nil {
+		t.Fatalf("Load failed: %v", err)
+	}
+	const wantDisplay = "2.9.x (Daily 648) - 2026-07-28"
+	if updatedState.DisplayVersion != wantDisplay {
+		t.Fatalf("DisplayVersion = %q, want %q", updatedState.DisplayVersion, wantDisplay)
 	}
 }
 
@@ -1326,8 +1400,8 @@ func TestResolveLatest_AuthFailsFallsBackToAnon(t *testing.T) {
 		case "/GTNewHorizons/DreamAssemblerXXL/master/releases/manifests/daily.json":
 			writeJSON(t, w, map[string]any{
 				"version": "daily", "last_version": "daily-previous", "last_updated": "2026-02-20",
-				"config":      "cfg-1",
-				"github_mods": map[string]any{"TestMod": map[string]any{"version": "1.0.0", "side": "BOTH"}},
+				"config":        "cfg-1",
+				"github_mods":   map[string]any{"TestMod": map[string]any{"version": "1.0.0", "side": "BOTH"}},
 				"external_mods": map[string]any{},
 			})
 		case "/GTNewHorizons/DreamAssemblerXXL/master/gtnh-assets.json":
@@ -1416,8 +1490,8 @@ func TestResolveLatest_GitHubUnreachableUsesMaven(t *testing.T) {
 		case "/GTNewHorizons/DreamAssemblerXXL/master/releases/manifests/daily.json":
 			writeJSON(t, w, map[string]any{
 				"version": "daily", "last_version": "daily-previous", "last_updated": "2026-02-20",
-				"config":      "cfg-1",
-				"github_mods": map[string]any{"TestMod": map[string]any{"version": "1.0.0", "side": "BOTH"}},
+				"config":        "cfg-1",
+				"github_mods":   map[string]any{"TestMod": map[string]any{"version": "1.0.0", "side": "BOTH"}},
 				"external_mods": map[string]any{},
 			})
 		case "/GTNewHorizons/DreamAssemblerXXL/master/gtnh-assets.json":
@@ -1495,8 +1569,8 @@ func TestResolveLatest_GitHubOlderDoesNotConsultMaven(t *testing.T) {
 		case "/GTNewHorizons/DreamAssemblerXXL/master/releases/manifests/daily.json":
 			writeJSON(t, w, map[string]any{
 				"version": "daily", "last_version": "daily-previous", "last_updated": "2026-02-20",
-				"config":      "cfg-1",
-				"github_mods": map[string]any{"TestMod": map[string]any{"version": "1.0.0", "side": "BOTH"}},
+				"config":        "cfg-1",
+				"github_mods":   map[string]any{"TestMod": map[string]any{"version": "1.0.0", "side": "BOTH"}},
 				"external_mods": map[string]any{},
 			})
 		case "/GTNewHorizons/DreamAssemblerXXL/master/gtnh-assets.json":
@@ -1680,4 +1754,96 @@ func TestRun_StampsVersionAfterConfigSnapshot(t *testing.T) {
 	if strings.TrimSpace(repoContent) != strings.TrimSpace(defaultLine) {
 		t.Fatalf("snapshot commit content = %q, want unstamped default %q", repoContent, defaultLine)
 	}
+}
+
+// TestRun_OldVersionFallsBackToConfigVersion pins the OldVersion/NewVersion/
+// OldConfigVersion/NewConfigVersion fields on UpdateResult: OldVersion mirrors
+// state.DisplayVersion when set, and falls back to state.ConfigVersion for a
+// pre-feature instance that never recorded one.
+func TestRun_OldVersionFallsBackToConfigVersion(t *testing.T) {
+	const cfgVersion = "2.9.0-nightly-2026-07-28"
+	m := &manifest.DailyManifest{
+		Version:      "daily",
+		LastUpdated:  "2026-07-28T00:00:00+00:00",
+		Config:       cfgVersion, // unchanged vs state: keeps the run offline (no ApplyUpdate)
+		GithubMods:   map[string]manifest.ModInfo{},
+		ExternalMods: map[string]manifest.ModInfo{},
+	}
+	db := &assets.AssetsDB{LatestDaily: 648}
+	wantNewVersion := "2.9.x (Daily 648) - 2026-07-28"
+
+	t.Run("with stored DisplayVersion", func(t *testing.T) {
+		instanceDir := t.TempDir()
+		if err := os.MkdirAll(filepath.Join(instanceDir, "mods"), 0o755); err != nil {
+			t.Fatalf("MkdirAll failed: %v", err)
+		}
+		state := &config.LocalState{
+			Side:           "server",
+			ManifestDate:   "2026-07-27",
+			ConfigVersion:  cfgVersion,
+			DisplayVersion: "2.9.x (Daily 600) - 2026-07-01",
+			Mods:           map[string]config.InstalledMod{},
+		}
+		if err := state.Save(instanceDir); err != nil {
+			t.Fatalf("Save failed: %v", err)
+		}
+
+		result, err := Run(context.Background(), Options{
+			InstanceDir: instanceDir,
+			Force:       true,
+			Shared:      &SharedData{Manifest: m, AssetsDB: db, Mode: "daily"},
+		})
+		if err != nil {
+			t.Fatalf("Run failed: %v", err)
+		}
+		if result.OldVersion != "2.9.x (Daily 600) - 2026-07-01" {
+			t.Errorf("OldVersion = %q, want stored DisplayVersion", result.OldVersion)
+		}
+		if result.NewVersion != wantNewVersion {
+			t.Errorf("NewVersion = %q, want %q", result.NewVersion, wantNewVersion)
+		}
+		if result.OldConfigVersion != cfgVersion {
+			t.Errorf("OldConfigVersion = %q, want %q", result.OldConfigVersion, cfgVersion)
+		}
+		if result.NewConfigVersion != cfgVersion {
+			t.Errorf("NewConfigVersion = %q, want %q", result.NewConfigVersion, cfgVersion)
+		}
+	})
+
+	t.Run("without stored DisplayVersion falls back to ConfigVersion", func(t *testing.T) {
+		instanceDir := t.TempDir()
+		if err := os.MkdirAll(filepath.Join(instanceDir, "mods"), 0o755); err != nil {
+			t.Fatalf("MkdirAll failed: %v", err)
+		}
+		state := &config.LocalState{
+			Side:          "server",
+			ManifestDate:  "2026-07-27",
+			ConfigVersion: cfgVersion,
+			Mods:          map[string]config.InstalledMod{},
+		}
+		if err := state.Save(instanceDir); err != nil {
+			t.Fatalf("Save failed: %v", err)
+		}
+
+		result, err := Run(context.Background(), Options{
+			InstanceDir: instanceDir,
+			Force:       true,
+			Shared:      &SharedData{Manifest: m, AssetsDB: db, Mode: "daily"},
+		})
+		if err != nil {
+			t.Fatalf("Run failed: %v", err)
+		}
+		if result.OldVersion != cfgVersion {
+			t.Errorf("OldVersion = %q, want fallback to ConfigVersion %q", result.OldVersion, cfgVersion)
+		}
+		if result.NewVersion != wantNewVersion {
+			t.Errorf("NewVersion = %q, want %q", result.NewVersion, wantNewVersion)
+		}
+		if result.OldConfigVersion != cfgVersion {
+			t.Errorf("OldConfigVersion = %q, want %q", result.OldConfigVersion, cfgVersion)
+		}
+		if result.NewConfigVersion != cfgVersion {
+			t.Errorf("NewConfigVersion = %q, want %q", result.NewConfigVersion, cfgVersion)
+		}
+	})
 }

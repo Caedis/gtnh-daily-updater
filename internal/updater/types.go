@@ -33,14 +33,20 @@ type Options struct {
 }
 
 type UpdateResult struct {
-	OldVersion    string
-	NewVersion    string
-	Added         int
-	Removed       int
-	Updated       int
-	Unchanged     int
-	ConfigUpdated bool
-	ConfigSkipped bool
+	// OldVersion and NewVersion hold the pack display version shown in
+	// summaries, e.g. "2.9.x (Daily 648) - 2026-07-28". OldVersion falls back
+	// to the config repo tag when no display version was recorded yet.
+	OldVersion string
+	NewVersion string
+	// OldConfigVersion and NewConfigVersion hold the config repo tags.
+	OldConfigVersion string
+	NewConfigVersion string
+	Added            int
+	Removed          int
+	Updated          int
+	Unchanged        int
+	ConfigUpdated    bool
+	ConfigSkipped    bool
 	// StampedFiles lists pack files whose version stamp was rewritten.
 	StampedFiles []string
 	Skipped      []string
