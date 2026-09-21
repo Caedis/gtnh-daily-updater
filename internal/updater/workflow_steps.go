@@ -151,14 +151,30 @@ func refreshTrackedMods(state *config.LocalState, db *assets.AssetsDB, m *manife
 	if err != nil {
 		return fmt.Errorf("scanning mods directory: %w", err)
 	}
+
+	// Don't preserve an old mod identity if its jar was already claimed by
+	// another identity during the scan, e.g. after a manifest mod rename.
+	claimedFiles := make(map[string]bool, len(scannedMods))
+	for _, installed := range scannedMods {
+		if installed.Filename != "" {
+			claimedFiles[installed.Filename] = true
+		}
+	}
+
 	for _, modName := range slices.Sorted(maps.Keys(state.Mods)) {
 		installed := state.Mods[modName]
 		if _, already := scannedMods[modName]; already {
 			continue
 		}
-		if installed.Filename != "" && diskFiles[installed.Filename] {
-			scannedMods[modName] = installed
+		if installed.Filename == "" || !diskFiles[installed.Filename] {
+			continue
 		}
+		if claimedFiles[installed.Filename] {
+			continue
+		}
+
+		scannedMods[modName] = installed
+		claimedFiles[installed.Filename] = true
 	}
 
 	// Detect stale jars: manifest mods still unresolved that have a renamed or
