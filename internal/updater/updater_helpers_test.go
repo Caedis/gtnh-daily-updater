@@ -152,6 +152,70 @@ func TestScanInstalledModsDetectsDisabled(t *testing.T) {
 	}
 }
 
+func TestRefreshTrackedModsDoesNotPreserveRenamedIdentity(t *testing.T) {
+	modsDir := t.TempDir()
+
+	const (
+		oldName  = "SpiceOfLife"
+		newName  = "Spice-of-Life"
+		version  = "2.2.10-carrot"
+		filename = "SpiceOfLife-2.2.10-carrot.jar"
+	)
+
+	if err := os.WriteFile(filepath.Join(modsDir, filename), []byte("jar"), 0o644); err != nil {
+		t.Fatalf("WriteFile failed: %v", err)
+	}
+
+	// Simulate an assets DB containing both the old and new identities for the
+	// same physical jar. The current manifest contains only the new identity.
+	db := stubAssetsDB([]struct{ name, version, filename string }{
+		{oldName, version, filename},
+		{newName, version, filename},
+	})
+
+	m := &manifest.DailyManifest{
+		ExternalMods: map[string]manifest.ModInfo{
+			newName: {
+				Version: version,
+				Side:    "BOTH",
+			},
+		},
+	}
+
+	// State from an update before the manifest rename.
+	state := &config.LocalState{
+		Side: "client",
+		Mods: map[string]config.InstalledMod{
+			oldName: {
+				Version:     version,
+				Filename:    filename,
+				RawFilename: filename,
+				Side:        "BOTH",
+			},
+		},
+	}
+
+	if err := refreshTrackedMods(state, db, m, modsDir); err != nil {
+		t.Fatalf("refreshTrackedMods failed: %v", err)
+	}
+
+	if len(state.Mods) != 1 {
+		t.Fatalf("expected exactly one tracked mod, got %d: %+v", len(state.Mods), state.Mods)
+	}
+
+	got, ok := state.Mods[newName]
+	if !ok {
+		t.Fatalf("expected renamed mod %q to be tracked: %+v", newName, state.Mods)
+	}
+	if got.Version != version || got.Filename != filename {
+		t.Fatalf("unexpected renamed mod entry: %+v", got)
+	}
+
+	if _, ok := state.Mods[oldName]; ok {
+		t.Fatalf("old identity %q was preserved after jar was claimed as %q", oldName, newName)
+	}
+}
+
 func TestBuildVersionPattern(t *testing.T) {
 	tests := []struct {
 		filename    string
