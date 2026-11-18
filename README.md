@@ -247,6 +247,7 @@ gtnh-daily-updater update-all main-client alt-server
 - On server/other layouts, game files are resolved directly under `<instance-dir>/`
 - Config files are tracked in a git repo at `<game-dir>/.gtnh-configs/` on a `local` branch; pack updates are applied via `git merge -X theirs` (pack wins on conflicts)
 - Tracked items: `config/`, `journeymap/` (preserving `data/`), `resourcepacks/` (client only), `serverutilities/`, `servers.json` (client only)
+- The repo skips locale and guide files that the release build adds on top of the pack tag (`config/txloader/load/*/lang/`, `config/txloader/load/*/guidenh/`, `config/guidenh/DefaultGuide.zip`) unless the pack tag tracks them; the files stay on disk, and an older repo untracks them on the next `update`
 - `config diff` shows your changes relative to the pack version (`git diff <configVersion>..local`)
 - `config diff "GregTech/Pollution.cfg"` shows diff for a specific file (also accepts `config/GregTech/Pollution.cfg`)
 - Config tracking requires git; config updates are skipped gracefully if git is unavailable or the repo hasn't been initialized yet
