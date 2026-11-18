@@ -282,6 +282,22 @@ func TestApplyStampsBarePackDefault(t *testing.T) {
 	}
 }
 
+// TestApplyStampsServerEscapedMotd covers a MOTD rewritten by the server,
+// which escapes the colon in "GT:New Horizons".
+func TestApplyStampsServerEscapedMotd(t *testing.T) {
+	instanceDir, gameDir := fullInstance(t)
+	path := filepath.Join(instanceDir, "server.properties")
+	writeTestFile(t, path, "motd=GT\\:New Horizons 2.9.x (Daily 724) - 2026-09-06\nserver-port=25565\n")
+
+	if _, err := Apply(instanceDir, gameDir, testVersion); err != nil {
+		t.Fatalf("Apply: %v", err)
+	}
+	want := "motd=GT:New Horizons " + testVersion.Long + "\nserver-port=25565\n"
+	if got := readTestFile(t, path); got != want {
+		t.Errorf("server.properties = %q, want %q", got, want)
+	}
+}
+
 func TestApplyNonDevVersionOmitsDateFromMainMenu(t *testing.T) {
 	instanceDir, gameDir := fullInstance(t)
 	v := DisplayVersion{Short: "2.9.0", Long: "2.9.0"}

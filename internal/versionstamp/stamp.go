@@ -72,6 +72,9 @@ func Apply(instanceDir, gameDir string, v DisplayVersion) ([]string, error) {
 // ships, so custom MOTDs and instance names survive an update.
 func prefixGuard(prefix string) func(string) bool {
 	return func(current string) bool {
+		// The server saves server.properties through java.util.Properties,
+		// which escapes ':' as '\:'.
+		current = strings.ReplaceAll(current, `\:`, ":")
 		return current == prefix || strings.HasPrefix(current, prefix+" ")
 	}
 }
