@@ -130,7 +130,8 @@ func Init(ctx context.Context, instanceDir, gameDir, side, configVersion string)
 
 // Snapshot captures current player changes in the git repo.
 // Always commits (even if nothing changed) to record a checkpoint.
-func Snapshot(ctx context.Context, gameDir, side string) error {
+// configVersion is the pack version currently applied to the instance.
+func Snapshot(ctx context.Context, gameDir, side, configVersion string) error {
 	repoDir := ConfigRepoDir(gameDir)
 	logging.Debugf("Verbose: gitconfigs snapshot gameDir=%q side=%s\n", gameDir, side)
 
@@ -144,6 +145,7 @@ func Snapshot(ctx context.Context, gameDir, side string) error {
 	if err := ensureAssemblerExcludes(repoDir); err != nil {
 		return err
 	}
+	untrackAssemblerFiles(ctx, repoDir, configVersion)
 
 	if err := runGit(ctx, repoDir, "add", "-A"); err != nil {
 		return fmt.Errorf("staging files: %w", err)
@@ -273,11 +275,9 @@ func ensureBaseRecorded(ctx context.Context, repoDir, prevConfigVersion string) 
 	commitish := prevConfigVersion + "^{commit}"
 
 	// Make the previous tag's commit available locally (older runs may have GC'd it).
-	if _, err := runGitOutput(ctx, repoDir, "rev-parse", "-q", "--verify", commitish); err != nil {
-		if ferr := runGit(ctx, repoDir, "fetch", "--force", "--no-tags", "origin", "tag", prevConfigVersion); ferr != nil {
-			logging.Debugf("Verbose: gitconfigs re-baseline skipped, cannot fetch %s: %v\n", prevConfigVersion, ferr)
-			return
-		}
+	if err := ensureTagFetched(ctx, repoDir, prevConfigVersion); err != nil {
+		logging.Debugf("Verbose: gitconfigs re-baseline skipped, cannot fetch %s: %v\n", prevConfigVersion, err)
+		return
 	}
 
 	// Already in ancestry → real-merge repos and fresh inits land here; nothing to do.
@@ -291,6 +291,69 @@ func ensureBaseRecorded(ctx context.Context, repoDir, prevConfigVersion string) 
 	if err := runGit(ctx, repoDir, "merge", "-s", "ours", "--no-ff", "--no-edit", "-m", msg, commitish); err != nil {
 		logging.Debugf("Verbose: gitconfigs re-baseline graft failed (continuing): %v\n", err)
 	}
+}
+
+// ensureTagFetched fetches tag from origin unless its commit is already in the repo.
+func ensureTagFetched(ctx context.Context, repoDir, tag string) error {
+	if _, err := runGitOutput(ctx, repoDir, "rev-parse", "-q", "--verify", tag+"^{commit}"); err == nil {
+		return nil
+	}
+	return runGit(ctx, repoDir, "fetch", "--force", "--no-tags", "origin", "tag", tag)
+}
+
+// untrackAssemblerFiles removes from the index the files matching assemblerExcludeEntries that configVersion does not track.
+func untrackAssemblerFiles(ctx context.Context, repoDir, configVersion string) {
+	// Repos initialized before the excludes existed committed these files as
+	// local additions. Best-effort: without the pack tree we cannot tell pack
+	// files apart, so any failure leaves the index unchanged.
+	if configVersion == "" {
+		return
+	}
+	trackedOut, err := runGitOutput(ctx, repoDir, "ls-files", "-z", "--cached", "--ignored", "--exclude-from=.git/info/exclude")
+	if err != nil {
+		logging.Debugf("Verbose: gitconfigs assembler untrack skipped, ls-files failed: %v\n", err)
+		return
+	}
+	if trackedOut == "" {
+		return
+	}
+	if err := ensureTagFetched(ctx, repoDir, configVersion); err != nil {
+		logging.Debugf("Verbose: gitconfigs assembler untrack skipped, cannot fetch %s: %v\n", configVersion, err)
+		return
+	}
+	packOut, err := runGitOutput(ctx, repoDir, "ls-tree", "-r", "-z", "--name-only", configVersion+"^{commit}")
+	if err != nil {
+		logging.Debugf("Verbose: gitconfigs assembler untrack skipped, ls-tree failed: %v\n", err)
+		return
+	}
+	packFiles := make(map[string]bool)
+	for p := range strings.SplitSeq(packOut, "\x00") {
+		packFiles[p] = true
+	}
+
+	var untrack []string
+	for p := range strings.SplitSeq(strings.TrimRight(trackedOut, "\x00"), "\x00") {
+		if !packFiles[p] {
+			untrack = append(untrack, p)
+		}
+	}
+	if len(untrack) == 0 {
+		return
+	}
+
+	// A pathspec file avoids the Windows command-line limit; literal pathspecs
+	// keep names like "GuideNH[guidenh]" from being read as globs.
+	listPath := filepath.Join(repoDir, ".git", "assembler-untrack.lst")
+	if err := os.WriteFile(listPath, []byte(strings.Join(untrack, "\x00")), 0o644); err != nil {
+		logging.Debugf("Verbose: gitconfigs assembler untrack skipped, writing list failed: %v\n", err)
+		return
+	}
+	defer os.Remove(listPath)
+	if err := runGit(ctx, repoDir, "--literal-pathspecs", "rm", "--cached", "-q", "--pathspec-from-file="+listPath, "--pathspec-file-nul"); err != nil {
+		logging.Debugf("Verbose: gitconfigs assembler untrack failed (continuing): %v\n", err)
+		return
+	}
+	logging.Debugf("Verbose: gitconfigs untracked %d assembler-added file(s)\n", len(untrack))
 }
 
 // resolveRemainingConflicts handles conflict types left over by `merge -X theirs`
