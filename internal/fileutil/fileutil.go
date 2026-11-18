@@ -41,7 +41,7 @@ func CopyFile(src, dst string) error {
 	return os.Chtimes(dst, info.ModTime(), info.ModTime())
 }
 
-// CopyDirExcluding recursively copies src to dst, skipping named top-level subdirectories.
+// CopyDirExcluding recursively copies src to dst, skipping symlinks and named top-level subdirectories.
 func CopyDirExcluding(src, dst string, excludeTopLevel ...string) error {
 	excludeSet := make(map[string]bool, len(excludeTopLevel))
 	for _, e := range excludeTopLevel {
@@ -72,6 +72,11 @@ func CopyDirExcluding(src, dst string, excludeTopLevel ...string) error {
 			if d.IsDir() {
 				return filepath.SkipDir
 			}
+			return nil
+		}
+
+		// WalkDir does not follow symlinks, and CopyFile fails on a linked directory.
+		if d.Type()&fs.ModeSymlink != 0 {
 			return nil
 		}
 

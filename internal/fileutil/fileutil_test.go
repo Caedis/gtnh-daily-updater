@@ -56,3 +56,28 @@ func TestWriteFileAtomicAppliesPerm(t *testing.T) {
 		t.Fatalf("perm = %v, want at least 0600", info.Mode().Perm())
 	}
 }
+
+func TestCopyDirExcludingSkipsSymlinks(t *testing.T) {
+	src := t.TempDir()
+	linked := t.TempDir()
+	if err := os.WriteFile(filepath.Join(src, "pack.mcmeta"), []byte("{}"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(linked, "inside.png"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(linked, filepath.Join(src, "assets")); err != nil {
+		t.Skipf("cannot create symlink: %v", err)
+	}
+
+	dst := filepath.Join(t.TempDir(), "out")
+	if err := CopyDirExcluding(src, dst); err != nil {
+		t.Fatalf("CopyDirExcluding: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dst, "pack.mcmeta")); err != nil {
+		t.Errorf("pack.mcmeta not copied: %v", err)
+	}
+	if _, err := os.Lstat(filepath.Join(dst, "assets")); !os.IsNotExist(err) {
+		t.Errorf("assets symlink was copied, want skipped (err = %v)", err)
+	}
+}
