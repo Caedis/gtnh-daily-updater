@@ -616,6 +616,55 @@ func TestEnsureGitignoreUntracksCommittedLog(t *testing.T) {
 	}
 }
 
+func TestAssemblerExcludesSkipAddedFilesKeepTracked(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+	gitInit(t, dir)
+
+	// The pack tag tracks one locale file under an excluded path.
+	tracked := "config/txloader/load/tectech/lang/ru_RU.lang"
+	writeFile(t, filepath.Join(dir, tracked), "pack\n")
+	if err := runGit(ctx, dir, "add", "-A"); err != nil {
+		t.Fatal(err)
+	}
+	if err := runGit(ctx, dir, "commit", "-m", "pack"); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := ensureAssemblerExcludes(dir); err != nil {
+		t.Fatalf("ensureAssemblerExcludes: %v", err)
+	}
+	first, _ := os.ReadFile(filepath.Join(dir, ".git", "info", "exclude"))
+	if err := ensureAssemblerExcludes(dir); err != nil {
+		t.Fatalf("second ensureAssemblerExcludes: %v", err)
+	}
+	second, _ := os.ReadFile(filepath.Join(dir, ".git", "info", "exclude"))
+	if string(first) != string(second) {
+		t.Fatalf("not idempotent: %q vs %q", first, second)
+	}
+
+	// Files the assembler adds on top of the tag, plus a real player edit.
+	writeFile(t, filepath.Join(dir, tracked), "changed\n")
+	writeFile(t, filepath.Join(dir, "config/txloader/load/gregtech/lang/de_DE.lang"), "x\n")
+	writeFile(t, filepath.Join(dir, "config/txloader/load/GuideNH[guidenh]/lang/ru_RU/tooltip/a.txt"), "x\n")
+	writeFile(t, filepath.Join(dir, "config/txloader/load/changelog/guidenh/en_us/index.md"), "x\n")
+	writeFile(t, filepath.Join(dir, "config/guidenh/DefaultGuide.zip"), "x")
+	writeFile(t, filepath.Join(dir, "config/mod.cfg"), "player\n")
+
+	if err := runGit(ctx, dir, "add", "-A"); err != nil {
+		t.Fatal(err)
+	}
+	out, err := runGitOutput(ctx, dir, "diff", "--cached", "--name-only")
+	if err != nil {
+		t.Fatalf("diff: %v", err)
+	}
+	got := strings.Fields(out)
+	want := []string{"config/mod.cfg", tracked}
+	if strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Fatalf("staged = %v, want %v", got, want)
+	}
+}
+
 // TestFetchForceUpdatesMovedUpstreamTag guards the nightly-tag mutation case:
 // GTNH re-points nightly tags upstream; without --force, `git fetch` keeps the
 // stale local ref, the next merge says "Already up to date", and the real pack

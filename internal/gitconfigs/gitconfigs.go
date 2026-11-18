@@ -25,6 +25,13 @@ var gitignoreEntries = []string{
 	"journeymap/journeymap.log",
 }
 
+// assemblerExcludeEntries are paths the release assembler adds on top of the modpack tag (locale packs, guides).
+var assemblerExcludeEntries = []string{
+	"config/txloader/load/*/lang/",
+	"config/txloader/load/*/guidenh/",
+	"config/guidenh/DefaultGuide.zip",
+}
+
 // ConfigRepoDir returns the path to the git repo inside gameDir.
 func ConfigRepoDir(gameDir string) string {
 	return filepath.Join(gameDir, RepoDir)
@@ -103,6 +110,9 @@ func Init(ctx context.Context, instanceDir, gameDir, side, configVersion string)
 	if err := ensureGitignore(ctx, repoDir); err != nil {
 		return err
 	}
+	if err := ensureAssemblerExcludes(repoDir); err != nil {
+		return err
+	}
 
 	// Commit the local state
 	if err := runGit(ctx, repoDir, "add", "-A"); err != nil {
@@ -129,6 +139,9 @@ func Snapshot(ctx context.Context, gameDir, side string) error {
 	}
 
 	if err := ensureGitignore(ctx, repoDir); err != nil {
+		return err
+	}
+	if err := ensureAssemblerExcludes(repoDir); err != nil {
 		return err
 	}
 
@@ -603,6 +616,44 @@ func ensureGitignore(ctx context.Context, repoDir string) error {
 		if err := runGit(ctx, repoDir, "rm", "--cached", "--ignore-unmatch", "--", entry); err != nil {
 			return fmt.Errorf("untracking %s: %w", entry, err)
 		}
+	}
+	return nil
+}
+
+// ensureAssemblerExcludes adds assemblerExcludeEntries to the repo's .git/info/exclude.
+func ensureAssemblerExcludes(repoDir string) error {
+	// info/exclude leaves the tracked .gitignore unchanged. No git rm --cached here:
+	// the modpack tag tracks a few files under these paths.
+	path := filepath.Join(repoDir, ".git", "info", "exclude")
+	existing, err := os.ReadFile(path)
+	if err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("reading info/exclude: %w", err)
+	}
+
+	lines := make(map[string]bool)
+	for l := range strings.SplitSeq(string(existing), "\n") {
+		lines[strings.TrimSpace(l)] = true
+	}
+
+	content := string(existing)
+	for _, entry := range assemblerExcludeEntries {
+		if lines[entry] {
+			continue
+		}
+		if content != "" && !strings.HasSuffix(content, "\n") {
+			content += "\n"
+		}
+		content += entry + "\n"
+	}
+
+	if content == string(existing) {
+		return nil
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return fmt.Errorf("creating info dir: %w", err)
+	}
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		return fmt.Errorf("writing info/exclude: %w", err)
 	}
 	return nil
 }
