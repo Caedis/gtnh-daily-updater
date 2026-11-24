@@ -160,6 +160,9 @@ var updateAllCmd = &cobra.Command{
 			modsChanged := r.result.Added + r.result.Removed + r.result.Updated
 			logging.Infof("  %-20s  OK     %s   %d updated\n",
 				r.name, versionCell(r.result.OldVersion, r.result.NewVersion), modsChanged)
+			if r.result.TranslationError != nil {
+				logging.Infof("  %-20s  WARN   Translation: %v\n", r.name, r.result.TranslationError)
+			}
 		}
 
 		return firstErr

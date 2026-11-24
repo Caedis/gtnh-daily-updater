@@ -99,7 +99,7 @@ func TestUpdateTranslation(t *testing.T) {
 			if err := state.Save(dir); err != nil {
 				t.Fatal(err)
 			}
-			_, err := Run(t.Context(), Options{
+			result, err := Run(t.Context(), Options{
 				InstanceDir: dir,
 				DryRun:      tc.dryRun,
 				Force:       tc.force,
@@ -107,6 +107,10 @@ func TestUpdateTranslation(t *testing.T) {
 			})
 			if err != nil {
 				t.Fatal(err)
+			}
+			wantError := shouldDownload && (tc.status != http.StatusOK || tc.invalidZIP)
+			if (result.TranslationError != nil) != wantError {
+				t.Fatalf("TranslationError = %v, want error: %v", result.TranslationError, wantError)
 			}
 			if (requests.Load() > 0) != shouldDownload {
 				t.Fatalf("translation download requests = %d, want download: %v", requests.Load(), shouldDownload)

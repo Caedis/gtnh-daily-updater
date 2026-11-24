@@ -24,9 +24,9 @@ const maxTranslationBytes = 256 << 20
 var errTranslationRollback = errors.New("translation rollback incomplete")
 var errTranslationSymlink = errors.New("translation path contains a symbolic link")
 
-func refreshDailyTranslation(ctx context.Context, opts Options, gameDir, mode string, state *config.LocalState, db *assets.AssetsDB) {
+func refreshDailyTranslation(ctx context.Context, opts Options, gameDir, mode string, state *config.LocalState, db *assets.AssetsDB) error {
 	if mode != manifest.ModeDaily || !strings.EqualFold(state.Side, "client") {
-		return
+		return nil
 	}
 
 	locale, asset, err := findTranslation(gameDir, db)
@@ -35,31 +35,32 @@ func refreshDailyTranslation(ctx context.Context, opts Options, gameDir, mode st
 	}
 	if err != nil {
 		logging.Infof("  Translation (%s, none): update failed: %v\n", locale, err)
-		return
+		return err
 	}
 	if asset == nil {
 		logging.Infof("  Translation (%s, none): skipped, no pack available\n", locale)
-		return
+		return nil
 	}
 	release := asset.Filename
 	if !opts.Force && state.TranslationRelease == release {
 		logging.Infof("  Translation (%s, %s): already installed\n", locale, release)
-		return
+		return nil
 	}
 	if err := installTranslation(ctx, gameDir, locale, *asset, opts.GithubToken); err != nil {
 		if errors.Is(err, errTranslationSymlink) {
 			logging.Infof("  Translation (%s, %s): skipped: %v\n", locale, release, err)
-		} else {
-			logging.Infof("  Translation (%s, %s): update failed: %v\n", locale, release, err)
+			return nil
 		}
-		return
+		logging.Infof("  Translation (%s, %s): update failed: %v\n", locale, release, err)
+		return fmt.Errorf("%s, %s: %w", locale, release, err)
 	}
 	state.TranslationRelease = release
 	if err := state.Save(opts.InstanceDir); err != nil {
 		logging.Infof("  Translation (%s, %s): updated, but could not save the installed release: %v\n", locale, release, err)
-		return
+		return fmt.Errorf("could not save the installed release %s: %w", release, err)
 	}
 	logging.Infof("  Translation (%s, %s): updated\n", locale, release)
+	return nil
 }
 
 func findTranslation(gameDir string, db *assets.AssetsDB) (string, *assets.VersionAsset, error) {
