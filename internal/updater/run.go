@@ -6,6 +6,7 @@ import (
 
 	"github.com/caedis/gtnh-daily-updater/internal/config"
 	"github.com/caedis/gtnh-daily-updater/internal/diff"
+	"github.com/caedis/gtnh-daily-updater/internal/gitconfigs"
 	"github.com/caedis/gtnh-daily-updater/internal/github"
 	"github.com/caedis/gtnh-daily-updater/internal/logging"
 	"github.com/caedis/gtnh-daily-updater/internal/manifest"
@@ -94,6 +95,11 @@ func Run(ctx context.Context, opts Options) (*UpdateResult, error) {
 	}
 
 	if !opts.Force && !opts.DryRun && result.Added == 0 && result.Removed == 0 && result.Updated == 0 && state.ConfigVersion == effectiveConfigVersion {
+		if gitconfigs.IsGitAvailable() {
+			if err := gitconfigs.RecoverPendingUpdate(ctx, gameDir, state.ConfigVersion); err != nil {
+				return nil, err
+			}
+		}
 		result.UpToDate = true
 		stampVersionIfNeeded(opts.InstanceDir, gameDir, displayVersion, opts, result)
 		// Record the display version here too: this path never reaches

@@ -135,8 +135,8 @@ func Snapshot(ctx context.Context, gameDir, side, configVersion string) error {
 	repoDir := ConfigRepoDir(gameDir)
 	logging.Debugf("Verbose: gitconfigs snapshot gameDir=%q side=%s\n", gameDir, side)
 
-	if err := rewindUnappliedMerge(ctx, repoDir, configVersion); err != nil {
-		return fmt.Errorf("recovering previous config update: %w", err)
+	if err := RecoverPendingUpdate(ctx, gameDir, configVersion); err != nil {
+		return err
 	}
 	if err := copyTrackedItemsToRepo(gameDir, repoDir, side); err != nil {
 		return fmt.Errorf("copying configs to repo: %w", err)
@@ -162,13 +162,20 @@ func Snapshot(ctx context.Context, gameDir, side, configVersion string) error {
 	return nil
 }
 
-func rewindUnappliedMerge(ctx context.Context, repoDir, installedVersion string) error {
+// RecoverPendingUpdate rewinds a config merge whose version is absent from instance state.
+func RecoverPendingUpdate(ctx context.Context, gameDir, installedVersion string) error {
 	if installedVersion == "" {
 		return nil
 	}
+	repoDir := ConfigRepoDir(gameDir)
+	if _, err := os.Stat(filepath.Join(repoDir, ".git")); os.IsNotExist(err) {
+		return nil
+	} else if err != nil {
+		return fmt.Errorf("checking config repository: %w", err)
+	}
 	head, err := runGitOutput(ctx, repoDir, "log", "-1", "--format=%P%n%s")
 	if err != nil {
-		return err
+		return fmt.Errorf("checking for a pending config update: %w", err)
 	}
 	parents, subject, _ := strings.Cut(strings.TrimSpace(head), "\n")
 	version, isPackMerge := strings.CutPrefix(strings.TrimSpace(subject), "Update configs to ")
@@ -176,10 +183,12 @@ func rewindUnappliedMerge(ctx context.Context, repoDir, installedVersion string)
 		return nil
 	}
 
-	// The merge committed before the config swap; otherwise state would record its version.
-	// Keep the worktree intact until Snapshot copies the current instance files back in.
-	logging.Infof("Retrying config update after an incomplete installation of %s.\n", version)
-	return runGit(ctx, repoDir, "reset", "--mixed", "--no-refresh", "HEAD^1")
+	// Restore the worktree too because Snapshot preserves pack data in journeymap/data.
+	if err := runGit(ctx, repoDir, "reset", "--merge", "HEAD^1"); err != nil {
+		return fmt.Errorf("recovering previous config update: %w", err)
+	}
+	logging.Infof("Recovered config repository after an incomplete installation of %s.\n", version)
+	return nil
 }
 
 // ApplyUpdate fetches the new pack version and merges it into the local branch

@@ -976,6 +976,7 @@ func TestApplyUpdateRetriesFailedConfigSwap(t *testing.T) {
 	gameDir, repoDir := setupStampRepo(t)
 	const configPath = "config/DreamCoreMod.properties"
 	const packConfig = "displayedModpackVersion=2.9.1\n"
+	const journeyMapPath = "journeymap/data/pack.cfg"
 	git := func(args ...string) {
 		t.Helper()
 		if err := runGit(ctx, repoDir, args...); err != nil {
@@ -984,7 +985,8 @@ func TestApplyUpdateRetriesFailedConfigSwap(t *testing.T) {
 	}
 	git("checkout", "main")
 	writeFile(t, filepath.Join(repoDir, configPath), packConfig)
-	git("add", "--", configPath)
+	writeFile(t, filepath.Join(repoDir, journeyMapPath), "pack data\n")
+	git("add", "--", configPath, journeyMapPath)
 	git("commit", "-m", "pack v2")
 	git("tag", "v2")
 	git("checkout", "local")
@@ -992,6 +994,8 @@ func TestApplyUpdateRetriesFailedConfigSwap(t *testing.T) {
 
 	instanceConfig := filepath.Join(gameDir, configPath)
 	writeFile(t, instanceConfig, stampedLine)
+	playerJourneyMap := filepath.Join(gameDir, "journeymap/data/player.cfg")
+	writeFile(t, playerJourneyMap, "player data\n")
 	if err := Snapshot(ctx, gameDir, "client", "v1"); err != nil {
 		t.Fatal(err)
 	}
@@ -1012,12 +1016,17 @@ func TestApplyUpdateRetriesFailedConfigSwap(t *testing.T) {
 	if err := Snapshot(ctx, gameDir, "client", "v1"); err != nil {
 		t.Fatal(err)
 	}
+	snapshotFiles, err := runGitOutput(ctx, repoDir, "ls-tree", "-r", "--name-only", "HEAD", "--", journeyMapPath)
+	if err != nil || strings.TrimSpace(snapshotFiles) != "" {
+		t.Fatalf("snapshot contains unapplied pack data: %q, %v", snapshotFiles, err)
+	}
 	if err := ApplyUpdate(ctx, gameDir, "client", "v1", "v2"); err != nil {
 		t.Fatal(err)
 	}
 	for name, want := range map[string]string{
-		instanceConfig: packConfig,
-		playerConfig:   "edited after failure\n",
+		instanceConfig:   packConfig,
+		playerConfig:     "edited after failure\n",
+		playerJourneyMap: "player data\n",
 	} {
 		data, err := os.ReadFile(name)
 		if err != nil || strings.ReplaceAll(string(data), "\r\n", "\n") != want {

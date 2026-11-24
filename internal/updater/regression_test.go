@@ -1665,6 +1665,51 @@ func gitOutput(t *testing.T, dir string, args ...string) string {
 // default and wipe an earlier stamp. The config version is left UNCHANGED
 // versus the manifest so only Snapshot runs (no ApplyUpdate, no network),
 // keeping the whole run offline.
+func TestRunRecoversConfigMergeWhenAlreadyUpToDate(t *testing.T) {
+	if !gitconfigs.IsGitAvailable() {
+		t.Skip("git not available")
+	}
+	dir := t.TempDir()
+	repoDir := gitconfigs.ConfigRepoDir(dir)
+	if err := os.Mkdir(repoDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	gitCmd(t, repoDir, "init", "-b", "main")
+	gitCmd(t, repoDir, "config", "user.name", "test")
+	gitCmd(t, repoDir, "config", "user.email", "test@example.com")
+	gitCmd(t, repoDir, "config", "commit.gpgsign", "false")
+	gitCmd(t, repoDir, "commit", "--allow-empty", "-m", "pack v1")
+	gitCmd(t, repoDir, "branch", "local")
+	if err := os.WriteFile(filepath.Join(repoDir, "pack.cfg"), []byte("v2"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	gitCmd(t, repoDir, "add", "pack.cfg")
+	gitCmd(t, repoDir, "commit", "-m", "pack v2")
+	gitCmd(t, repoDir, "checkout", "local")
+	gitCmd(t, repoDir, "merge", "--no-ff", "-m", "Update configs to v2", "main")
+
+	state := &config.LocalState{Side: "server", ConfigVersion: "v1"}
+	if err := state.Save(dir); err != nil {
+		t.Fatal(err)
+	}
+	result, err := Run(t.Context(), Options{
+		InstanceDir: dir,
+		Shared:      &SharedData{Mode: manifest.ModeDaily, Manifest: &manifest.DailyManifest{Config: "v1"}, AssetsDB: &assets.AssetsDB{}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !result.UpToDate {
+		t.Fatal("expected up-to-date result")
+	}
+	if subject := gitOutput(t, repoDir, "log", "-1", "--format=%s"); strings.TrimSpace(subject) != "pack v1" {
+		t.Fatalf("unexpected config repo HEAD: %q", subject)
+	}
+	if _, err := os.Stat(filepath.Join(repoDir, "pack.cfg")); !os.IsNotExist(err) {
+		t.Fatalf("unapplied config file remains in config repo: %v", err)
+	}
+}
+
 func TestRun_StampsVersionAfterConfigSnapshot(t *testing.T) {
 	if !gitconfigs.IsGitAvailable() {
 		t.Skip("git not available")
