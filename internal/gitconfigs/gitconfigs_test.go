@@ -967,3 +967,70 @@ func TestStampedConfigMergesCleanlyAcrossPackUpdate(t *testing.T) {
 		t.Fatalf("after merge = %q, want the pack default 2.9.1", strings.TrimSpace(string(got)))
 	}
 }
+
+func TestApplyUpdateRetriesFailedConfigSwap(t *testing.T) {
+	if !IsGitAvailable() {
+		t.Skip("git not available")
+	}
+	ctx := t.Context()
+	gameDir, repoDir := setupStampRepo(t)
+	const configPath = "config/DreamCoreMod.properties"
+	const packConfig = "displayedModpackVersion=2.9.1\n"
+	const journeyMapPath = "journeymap/data/pack.cfg"
+	git := func(args ...string) {
+		t.Helper()
+		if err := runGit(ctx, repoDir, args...); err != nil {
+			t.Fatal(err)
+		}
+	}
+	git("checkout", "main")
+	writeFile(t, filepath.Join(repoDir, configPath), packConfig)
+	writeFile(t, filepath.Join(repoDir, journeyMapPath), "pack data\n")
+	git("add", "--", configPath, journeyMapPath)
+	git("commit", "-m", "pack v2")
+	git("tag", "v2")
+	git("checkout", "local")
+	git("remote", "add", "origin", repoDir)
+
+	instanceConfig := filepath.Join(gameDir, configPath)
+	writeFile(t, instanceConfig, stampedLine)
+	playerJourneyMap := filepath.Join(gameDir, "journeymap/data/player.cfg")
+	writeFile(t, playerJourneyMap, "player data\n")
+	if err := Snapshot(ctx, gameDir, "client", "v1"); err != nil {
+		t.Fatal(err)
+	}
+	blocker := filepath.Join(gameDir, "config.bak", "existing")
+	writeFile(t, blocker, "keep\n")
+	if err := ApplyUpdate(ctx, gameDir, "client", "v1", "v2"); err == nil || !strings.Contains(err.Error(), "renaming") {
+		t.Fatalf("want rename failure, got %v", err)
+	}
+	if err := os.Remove(blocker); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(filepath.Dir(blocker)); err != nil {
+		t.Fatal(err)
+	}
+	playerConfig := filepath.Join(gameDir, "config", "my-settings.cfg")
+	writeFile(t, playerConfig, "edited after failure\n")
+
+	if err := Snapshot(ctx, gameDir, "client", "v1"); err != nil {
+		t.Fatal(err)
+	}
+	snapshotFiles, err := runGitOutput(ctx, repoDir, "ls-tree", "-r", "--name-only", "HEAD", "--", journeyMapPath)
+	if err != nil || strings.TrimSpace(snapshotFiles) != "" {
+		t.Fatalf("snapshot contains unapplied pack data: %q, %v", snapshotFiles, err)
+	}
+	if err := ApplyUpdate(ctx, gameDir, "client", "v1", "v2"); err != nil {
+		t.Fatal(err)
+	}
+	for name, want := range map[string]string{
+		instanceConfig:   packConfig,
+		playerConfig:     "edited after failure\n",
+		playerJourneyMap: "player data\n",
+	} {
+		data, err := os.ReadFile(name)
+		if err != nil || strings.ReplaceAll(string(data), "\r\n", "\n") != want {
+			t.Errorf("%s = %q, %v; want %q", name, data, err, want)
+		}
+	}
+}
