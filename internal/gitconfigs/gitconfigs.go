@@ -135,6 +135,9 @@ func Snapshot(ctx context.Context, gameDir, side, configVersion string) error {
 	repoDir := ConfigRepoDir(gameDir)
 	logging.Debugf("Verbose: gitconfigs snapshot gameDir=%q side=%s\n", gameDir, side)
 
+	if err := rewindUnappliedMerge(ctx, repoDir, configVersion); err != nil {
+		return fmt.Errorf("recovering previous config update: %w", err)
+	}
 	if err := copyTrackedItemsToRepo(gameDir, repoDir, side); err != nil {
 		return fmt.Errorf("copying configs to repo: %w", err)
 	}
@@ -157,6 +160,26 @@ func Snapshot(ctx context.Context, gameDir, side, configVersion string) error {
 	logging.Debugf("Verbose: gitconfigs snapshot committed\n")
 
 	return nil
+}
+
+func rewindUnappliedMerge(ctx context.Context, repoDir, installedVersion string) error {
+	if installedVersion == "" {
+		return nil
+	}
+	head, err := runGitOutput(ctx, repoDir, "log", "-1", "--format=%P%n%s")
+	if err != nil {
+		return err
+	}
+	parents, subject, _ := strings.Cut(strings.TrimSpace(head), "\n")
+	version, isPackMerge := strings.CutPrefix(strings.TrimSpace(subject), "Update configs to ")
+	if !isPackMerge || version == installedVersion || len(strings.Fields(parents)) != 2 {
+		return nil
+	}
+
+	// The merge committed before the config swap; otherwise state would record its version.
+	// Keep the worktree intact until Snapshot copies the current instance files back in.
+	logging.Infof("Retrying config update after an incomplete installation of %s.\n", version)
+	return runGit(ctx, repoDir, "reset", "--mixed", "--no-refresh", "HEAD^1")
 }
 
 // ApplyUpdate fetches the new pack version and merges it into the local branch
