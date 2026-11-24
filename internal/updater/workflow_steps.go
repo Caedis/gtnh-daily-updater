@@ -417,7 +417,7 @@ func snapshotAndUpdateConfigsIfNeeded(ctx context.Context, state *config.LocalSt
 	}
 
 	// Always snapshot to capture player changes since last run
-	if err := gitconfigs.Snapshot(ctx, gameDir, state.Side); err != nil {
+	if err := gitconfigs.Snapshot(ctx, gameDir, state.Side, state.ConfigVersion); err != nil {
 		return rollback(fmt.Errorf("snapshotting configs: %w", err))
 	}
 
