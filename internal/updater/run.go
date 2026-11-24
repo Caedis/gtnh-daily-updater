@@ -101,6 +101,7 @@ func Run(ctx context.Context, opts Options) (*UpdateResult, error) {
 		// the empty fallback forever despite having its configs re-stamped.
 		recordDisplayVersionIfChanged(opts.InstanceDir, state, displayVersion.Long)
 		logging.Infoln("Already up to date.")
+		result.TranslationError = refreshDailyTranslation(ctx, opts, gameDir, mode, state, db)
 		return result, nil
 	}
 
@@ -142,6 +143,7 @@ func Run(ctx context.Context, opts Options) (*UpdateResult, error) {
 	if err := persistUpdatedState(ctx, state, changes, m, mode, opts, db, extraDownloads, latestDownloads, rollback, effectiveConfigVersion, displayVersion.Long, result); err != nil {
 		return nil, err
 	}
+	result.TranslationError = refreshDailyTranslation(ctx, opts, gameDir, mode, state, db)
 
 	return result, nil
 }

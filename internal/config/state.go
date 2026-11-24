@@ -18,10 +18,11 @@ type LocalState struct {
 	// DisplayVersion is the pack version as shown in game, e.g.
 	// "2.9.x (Daily 648) - 2026-07-28". Empty on state files written before
 	// this was tracked.
-	DisplayVersion string                  `json:"display_version,omitempty"`
-	Mods           map[string]InstalledMod `json:"mods"`
-	ExcludeMods    []string                `json:"exclude_mods,omitempty"`
-	ExtraMods      map[string]ExtraModSpec `json:"extra_mods,omitempty"`
+	DisplayVersion     string                  `json:"display_version,omitempty"`
+	TranslationRelease string                  `json:"translation_release,omitempty"`
+	Mods               map[string]InstalledMod `json:"mods"`
+	ExcludeMods        []string                `json:"exclude_mods,omitempty"`
+	ExtraMods          map[string]ExtraModSpec `json:"extra_mods,omitempty"`
 }
 
 type ExtraModSpec struct {

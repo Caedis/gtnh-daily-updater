@@ -47,6 +47,7 @@ type UpdateResult struct {
 	Unchanged        int
 	ConfigUpdated    bool
 	ConfigSkipped    bool
+	TranslationError error
 	// StampedFiles lists pack files whose version stamp was rewritten.
 	StampedFiles []string
 	Skipped      []string
