@@ -17,8 +17,9 @@ import (
 const AssetsURL = "https://raw.githubusercontent.com/GTNewHorizons/DreamAssemblerXXL/master/gtnh-assets.json"
 
 type AssetsDB struct {
-	Config AssetEntry   `json:"config"`
-	Mods   []AssetEntry `json:"mods"`
+	Config       AssetEntry   `json:"config"`
+	Mods         []AssetEntry `json:"mods"`
+	Translations AssetEntry   `json:"translations"`
 
 	// Dev build counters, used for the displayed pack version.
 	LatestDaily        int `json:"latest_daily"`
