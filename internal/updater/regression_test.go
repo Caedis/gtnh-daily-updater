@@ -1174,7 +1174,6 @@ type mockManifestAndAssets struct {
 
 func newUpdaterMockServer(t *testing.T, data mockManifestAndAssets) *httptest.Server {
 	t.Helper()
-	configTag, _ := data.manifest["config"].(string)
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/GTNewHorizons/DreamAssemblerXXL/master/releases/manifests/daily.json":
@@ -1183,8 +1182,6 @@ func newUpdaterMockServer(t *testing.T, data mockManifestAndAssets) *httptest.Se
 			writeJSON(t, w, data.manifest)
 		case "/GTNewHorizons/DreamAssemblerXXL/master/gtnh-assets.json":
 			writeJSON(t, w, data.assets)
-		case "/GTNewHorizons/GT-New-Horizons-Modpack/releases/download/" + configTag + "/" + configTag + ".zip":
-			w.WriteHeader(http.StatusNotFound)
 		default:
 			t.Fatalf("unexpected request path: %s", r.URL.Path)
 		}
@@ -1220,12 +1217,13 @@ func rewriteDefaultHTTPClient(t *testing.T, server *httptest.Server) func() {
 }
 
 type updaterRewriteHostTransport struct {
-	host string
-	rt   http.RoundTripper
+	host              string
+	rt                http.RoundTripper
+	allowGuideRelease bool
 }
 
 func (t *updaterRewriteHostTransport) RoundTrip(req *http.Request) (*http.Response, error) {
-	if req.URL.Path == "/GTNewHorizons/GT-New-Horizons-Modpack/releases/download/cfg-1/cfg-1.zip" {
+	if req.URL.Path == "/repos/GTNewHorizons/GTNH-Guide-Pack/releases/latest" && !t.allowGuideRelease {
 		response := httptest.NewRecorder()
 		response.WriteHeader(http.StatusNotFound)
 		return response.Result(), nil
@@ -1239,7 +1237,7 @@ func (t *updaterRewriteHostTransport) RoundTrip(req *http.Request) (*http.Respon
 // rewriteAllHTTPClients points the default client AND the github/maven
 // package-level clients at the test server, so FetchLatestRelease and Maven
 // metadata lookups (which capture their own client at init) are also rewritten.
-func rewriteAllHTTPClients(t *testing.T, server *httptest.Server) func() {
+func rewriteAllHTTPClients(t *testing.T, server *httptest.Server, allowGuideRelease ...bool) func() {
 	t.Helper()
 	parsed, err := url.Parse(server.URL)
 	if err != nil {
@@ -1248,8 +1246,9 @@ func rewriteAllHTTPClients(t *testing.T, server *httptest.Server) func() {
 
 	client := &http.Client{
 		Transport: &updaterRewriteHostTransport{
-			host: parsed.Host,
-			rt:   server.Client().Transport,
+			host:              parsed.Host,
+			rt:                server.Client().Transport,
+			allowGuideRelease: len(allowGuideRelease) > 0 && allowGuideRelease[0],
 		},
 	}
 

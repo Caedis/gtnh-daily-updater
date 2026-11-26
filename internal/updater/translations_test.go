@@ -80,10 +80,6 @@ func TestUpdateTranslation(t *testing.T) {
 			shouldDownload := tc.side == "client" && tc.mode == manifest.ModeDaily && !tc.dryRun && (!tc.installed || tc.force)
 			var requests atomic.Int32
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				if r.URL.Path == "/GTNewHorizons/GT-New-Horizons-Modpack/releases/download/cfg/cfg.zip" {
-					w.WriteHeader(http.StatusNotFound)
-					return
-				}
 				requests.Add(1)
 				w.WriteHeader(tc.status)
 				if tc.status == http.StatusOK {
