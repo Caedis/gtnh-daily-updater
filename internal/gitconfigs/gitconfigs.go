@@ -20,6 +20,9 @@ const (
 	GitUserEmail = "gtnh-daily-updater@localhost"
 )
 
+const defaultGuideConfigPath = "guidenh/DefaultGuide.zip"
+const DefaultGuidePath = "config/" + defaultGuideConfigPath
+
 // gitignoreEntries are paths the config repo should never track (churning logs).
 var gitignoreEntries = []string{
 	"journeymap/journeymap.log",
@@ -29,7 +32,7 @@ var gitignoreEntries = []string{
 var assemblerExcludeEntries = []string{
 	"config/txloader/load/*/lang/",
 	"config/txloader/load/*/guidenh/",
-	"config/guidenh/DefaultGuide.zip",
+	DefaultGuidePath,
 }
 
 // ConfigRepoDir returns the path to the git repo inside gameDir.
@@ -233,7 +236,7 @@ func ApplyUpdate(ctx context.Context, gameDir, side, prevConfigVersion, newConfi
 	changedOut, err := runGitOutput(ctx, repoDir, "diff", "--name-only", "HEAD~1", "HEAD")
 	if err != nil {
 		logging.Debugf("Verbose: gitconfigs could not determine changed files, replacing all: %v\n", err)
-		if err := atomicReplaceFromRepo(gameDir, repoDir, trackedItems(side)); err != nil {
+		if err := atomicReplaceFromRepo(gameDir, repoDir, trackedItems(side), side); err != nil {
 			return fmt.Errorf("applying updated configs: %w", err)
 		}
 	} else {
@@ -242,7 +245,7 @@ func ApplyUpdate(ctx context.Context, gameDir, side, prevConfigVersion, newConfi
 			logging.Debugf("Verbose: gitconfigs merge changed no tracked items, skipping file replacement\n")
 		} else {
 			logging.Debugf("Verbose: gitconfigs replacing %d changed tracked item(s)\n", len(items))
-			if err := atomicReplaceFromRepo(gameDir, repoDir, items); err != nil {
+			if err := atomicReplaceFromRepo(gameDir, repoDir, items, side); err != nil {
 				return fmt.Errorf("applying updated configs: %w", err)
 			}
 		}
@@ -514,7 +517,7 @@ func filterChangedItems(items []trackedItem, changedPaths []string) []trackedIte
 // atomicReplaceFromRepo copies the given items from repoDir back to gameDir atomically.
 // For each item: rename existing to .bak, copy from repo, remove .bak on success.
 // On failure: restore from .bak.
-func atomicReplaceFromRepo(gameDir, repoDir string, items []trackedItem) error {
+func atomicReplaceFromRepo(gameDir, repoDir string, items []trackedItem, side string) error {
 	var backed []string
 
 	rollback := func() {
@@ -562,6 +565,14 @@ func atomicReplaceFromRepo(gameDir, repoDir string, items []trackedItem) error {
 				}
 			} else {
 				copyErr = fileutil.CopyDirExcluding(src, dst)
+				if copyErr == nil && item.Name == "config" && strings.EqualFold(side, "client") {
+					guide := filepath.FromSlash(defaultGuideConfigPath)
+					oldGuide := filepath.Join(bak, guide)
+					newGuide := filepath.Join(dst, guide)
+					if info, err := os.Lstat(oldGuide); err == nil && info.Mode().IsRegular() {
+						copyErr = fileutil.CopyFile(oldGuide, newGuide)
+					}
+				}
 			}
 		}
 

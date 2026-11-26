@@ -80,6 +80,10 @@ func TestUpdateTranslation(t *testing.T) {
 			shouldDownload := tc.side == "client" && tc.mode == manifest.ModeDaily && !tc.dryRun && (!tc.installed || tc.force)
 			var requests atomic.Int32
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path == "/GTNewHorizons/GT-New-Horizons-Modpack/releases/download/cfg/cfg.zip" {
+					w.WriteHeader(http.StatusNotFound)
+					return
+				}
 				requests.Add(1)
 				w.WriteHeader(tc.status)
 				if tc.status == http.StatusOK {
@@ -87,6 +91,7 @@ func TestUpdateTranslation(t *testing.T) {
 				}
 			}))
 			defer server.Close()
+			defer rewriteDefaultHTTPClient(t, server)()
 			db := &assets.AssetsDB{Translations: assets.AssetEntry{Versions: []assets.VersionAsset{
 				{VersionTag: "de_DE-latest", Filename: "GTNH-de_DE-Translation-Daily-2026-11-18+526.zip"},
 				{VersionTag: "ru_RU-latest", Filename: release, BrowserDownloadURL: server.URL},

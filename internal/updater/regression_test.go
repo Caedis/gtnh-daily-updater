@@ -1136,14 +1136,13 @@ func TestRun_AlreadyUpToDateRecordsDisplayVersion(t *testing.T) {
 	})
 	restoreClient := rewriteDefaultHTTPClient(t, server)
 
-	// Pre-fetch SharedData exactly as update-all does, then take the server
-	// offline: the up-to-date path below must make no further network calls.
+	// Pre-fetch SharedData exactly as update-all does.
 	shared, err := FetchSharedData(context.Background(), "daily")
 	if err != nil {
 		t.Fatalf("FetchSharedData failed: %v", err)
 	}
-	restoreClient()
-	server.Close()
+	defer restoreClient()
+	defer server.Close()
 
 	// Force is intentionally NOT set: it skips the early-return branch under
 	// test entirely (it forces a real update path instead).
@@ -1175,6 +1174,7 @@ type mockManifestAndAssets struct {
 
 func newUpdaterMockServer(t *testing.T, data mockManifestAndAssets) *httptest.Server {
 	t.Helper()
+	configTag, _ := data.manifest["config"].(string)
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/GTNewHorizons/DreamAssemblerXXL/master/releases/manifests/daily.json":
@@ -1183,6 +1183,8 @@ func newUpdaterMockServer(t *testing.T, data mockManifestAndAssets) *httptest.Se
 			writeJSON(t, w, data.manifest)
 		case "/GTNewHorizons/DreamAssemblerXXL/master/gtnh-assets.json":
 			writeJSON(t, w, data.assets)
+		case "/GTNewHorizons/GT-New-Horizons-Modpack/releases/download/" + configTag + "/" + configTag + ".zip":
+			w.WriteHeader(http.StatusNotFound)
 		default:
 			t.Fatalf("unexpected request path: %s", r.URL.Path)
 		}
@@ -1223,6 +1225,11 @@ type updaterRewriteHostTransport struct {
 }
 
 func (t *updaterRewriteHostTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	if req.URL.Path == "/GTNewHorizons/GT-New-Horizons-Modpack/releases/download/cfg-1/cfg-1.zip" {
+		response := httptest.NewRecorder()
+		response.WriteHeader(http.StatusNotFound)
+		return response.Result(), nil
+	}
 	cloned := req.Clone(req.Context())
 	cloned.URL.Scheme = "http"
 	cloned.URL.Host = t.host

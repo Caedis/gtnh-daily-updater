@@ -37,6 +37,26 @@ func writeFile(t *testing.T, path, content string) {
 	}
 }
 
+func TestConfigSwapKeepsInstalledClientGuide(t *testing.T) {
+	gameDir, repoDir := t.TempDir(), t.TempDir()
+	guide := filepath.Join(gameDir, filepath.FromSlash(DefaultGuidePath))
+	writeFile(t, guide, "installed guide")
+	writeFile(t, filepath.Join(repoDir, "config", "example.cfg"), "new config")
+
+	for _, tracked := range []bool{false, true} {
+		if tracked {
+			writeFile(t, filepath.Join(repoDir, filepath.FromSlash(DefaultGuidePath)), "guide from Git")
+		}
+		if err := atomicReplaceFromRepo(gameDir, repoDir, []trackedItem{{Name: "config"}}, "client"); err != nil {
+			t.Fatal(err)
+		}
+		got, err := os.ReadFile(guide)
+		if err != nil || string(got) != "installed guide" {
+			t.Fatalf("DefaultGuide.zip (tracked=%v) = %q, %v; want installed guide", tracked, got, err)
+		}
+	}
+}
+
 // setupConflictRepo builds a repo with `local` and `pack` branches diverged
 // such that merging pack into local produces both a UD and a DU conflict.
 func setupConflictRepo(t *testing.T) string {
@@ -789,7 +809,8 @@ func TestFetchForceUpdatesMovedUpstreamTag(t *testing.T) {
 	if err := runGit(ctx, upstream, "commit", "-m", "B"); err != nil {
 		t.Fatal(err)
 	}
-	commitB, err := runGitOutput(ctx, upstream, "rev-parse", "HEAD"); if err != nil {
+	commitB, err := runGitOutput(ctx, upstream, "rev-parse", "HEAD")
+	if err != nil {
 		t.Fatal(err)
 	}
 

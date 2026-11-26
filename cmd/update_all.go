@@ -163,6 +163,9 @@ var updateAllCmd = &cobra.Command{
 			if r.result.TranslationError != nil {
 				logging.Infof("  %-20s  WARN   Translation: %v\n", r.name, r.result.TranslationError)
 			}
+			if r.result.DefaultGuideError != nil {
+				logging.Infof("  %-20s  WARN   %v\n", r.name, r.result.DefaultGuideError)
+			}
 		}
 
 		return firstErr
