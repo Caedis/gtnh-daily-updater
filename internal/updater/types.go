@@ -39,15 +39,16 @@ type UpdateResult struct {
 	OldVersion string
 	NewVersion string
 	// OldConfigVersion and NewConfigVersion hold the config repo tags.
-	OldConfigVersion string
-	NewConfigVersion string
-	Added            int
-	Removed          int
-	Updated          int
-	Unchanged        int
-	ConfigUpdated    bool
-	ConfigSkipped    bool
-	TranslationError error
+	OldConfigVersion  string
+	NewConfigVersion  string
+	Added             int
+	Removed           int
+	Updated           int
+	Unchanged         int
+	ConfigUpdated     bool
+	ConfigSkipped     bool
+	TranslationError  error
+	DefaultGuideError error
 	// StampedFiles lists pack files whose version stamp was rewritten.
 	StampedFiles []string
 	Skipped      []string

@@ -15,6 +15,7 @@ Always make a full instance backup before first using this program
 - Initializes tracking from an existing instance (`init`)
 - Updates mods to manifest-pinned versions (`update`)
 - Updates the active language pack on daily clients. Files included in the official translation ZIP replace local copies, including local edits.
+- Updates the default guide on clients from the release marked Latest in GTNH-Guide-Pack, even when the mods and configs are up to date.
 - Optional `--latest` mode to use newest non-pre releases when available (Only use if you know what you are doing)
 - Tracks config files with a local git branch; merges pack updates automatically (pack wins on conflicts)
 - Supports excluded mods and user-defined extra mods

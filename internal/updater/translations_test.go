@@ -87,6 +87,7 @@ func TestUpdateTranslation(t *testing.T) {
 				}
 			}))
 			defer server.Close()
+			defer rewriteDefaultHTTPClient(t, server)()
 			db := &assets.AssetsDB{Translations: assets.AssetEntry{Versions: []assets.VersionAsset{
 				{VersionTag: "de_DE-latest", Filename: "GTNH-de_DE-Translation-Daily-2026-11-18+526.zip"},
 				{VersionTag: "ru_RU-latest", Filename: release, BrowserDownloadURL: server.URL},

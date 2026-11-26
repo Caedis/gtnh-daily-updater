@@ -1136,14 +1136,13 @@ func TestRun_AlreadyUpToDateRecordsDisplayVersion(t *testing.T) {
 	})
 	restoreClient := rewriteDefaultHTTPClient(t, server)
 
-	// Pre-fetch SharedData exactly as update-all does, then take the server
-	// offline: the up-to-date path below must make no further network calls.
+	// Pre-fetch SharedData exactly as update-all does.
 	shared, err := FetchSharedData(context.Background(), "daily")
 	if err != nil {
 		t.Fatalf("FetchSharedData failed: %v", err)
 	}
-	restoreClient()
-	server.Close()
+	defer restoreClient()
+	defer server.Close()
 
 	// Force is intentionally NOT set: it skips the early-return branch under
 	// test entirely (it forces a real update path instead).
@@ -1218,11 +1217,17 @@ func rewriteDefaultHTTPClient(t *testing.T, server *httptest.Server) func() {
 }
 
 type updaterRewriteHostTransport struct {
-	host string
-	rt   http.RoundTripper
+	host              string
+	rt                http.RoundTripper
+	allowGuideRelease bool
 }
 
 func (t *updaterRewriteHostTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	if req.URL.Path == "/repos/GTNewHorizons/GTNH-Guide-Pack/releases/latest" && !t.allowGuideRelease {
+		response := httptest.NewRecorder()
+		response.WriteHeader(http.StatusNotFound)
+		return response.Result(), nil
+	}
 	cloned := req.Clone(req.Context())
 	cloned.URL.Scheme = "http"
 	cloned.URL.Host = t.host
@@ -1232,7 +1237,7 @@ func (t *updaterRewriteHostTransport) RoundTrip(req *http.Request) (*http.Respon
 // rewriteAllHTTPClients points the default client AND the github/maven
 // package-level clients at the test server, so FetchLatestRelease and Maven
 // metadata lookups (which capture their own client at init) are also rewritten.
-func rewriteAllHTTPClients(t *testing.T, server *httptest.Server) func() {
+func rewriteAllHTTPClients(t *testing.T, server *httptest.Server, allowGuideRelease ...bool) func() {
 	t.Helper()
 	parsed, err := url.Parse(server.URL)
 	if err != nil {
@@ -1241,8 +1246,9 @@ func rewriteAllHTTPClients(t *testing.T, server *httptest.Server) func() {
 
 	client := &http.Client{
 		Transport: &updaterRewriteHostTransport{
-			host: parsed.Host,
-			rt:   server.Client().Transport,
+			host:              parsed.Host,
+			rt:                server.Client().Transport,
+			allowGuideRelease: len(allowGuideRelease) > 0 && allowGuideRelease[0],
 		},
 	}
 
